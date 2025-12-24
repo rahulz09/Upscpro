@@ -17,7 +17,14 @@ A personalized platform for mastering the civil services (UPSC) exam. Users can 
 - **Storage**: LocalStorage for tests and performance history
 
 ## Setup Requirements
-This app requires a `GEMINI_API_KEY` secret to enable AI-powered test generation. Add it via the Secrets panel.
+- **Option A (Frontend AI)**: Set `GEMINI_API_KEY` to enable AI-powered test generation directly in the browser.
+- **Option B (Replit backend / proxy)**: Set `VITE_API_BASE_URL` to your backend base URL and implement `POST /api/upsc/generate-questions` to generate questions server-side (no key in browser).
+- **No-AI Bulk Import**: The **Bulk Import** tab works fully offline (example format parsing) even if AI is not configured.
+
+### Backend endpoint contract (for Option B)
+- **URL**: `POST /api/upsc/generate-questions`
+- **Body**: `{ "contents": <string | object>, "model": "gemini-2.5-flash" }`
+- **Response**: `Question[]` (same schema used by the frontend)
 
 ## Development
 - Run `npm run dev` to start the development server on port 5000

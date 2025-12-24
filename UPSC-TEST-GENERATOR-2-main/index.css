@@ -1043,6 +1043,65 @@ input[type="range"]::-moz-range-thumb:hover {
     gap: 1rem;
 }
 
+/* List controls (search/sort) */
+.list-controls {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.search-box {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.85rem 1rem;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid var(--card-border-color);
+    border-radius: 12px;
+    flex: 1;
+    min-width: 220px;
+}
+
+.search-box .material-symbols-outlined {
+    color: var(--text-muted);
+    font-size: 1.2rem;
+}
+
+.search-box input[type="search"] {
+    border: none;
+    outline: none;
+    background: transparent;
+    padding: 0;
+    color: var(--text-color);
+    font-size: 16px;
+}
+
+.search-box input[type="search"]::placeholder {
+    color: var(--text-muted);
+    opacity: 0.8;
+}
+
+#all-tests-sort {
+    min-width: 180px;
+}
+
+.list-stats {
+    text-align: left;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+
+@media (max-width: 520px) {
+    #all-tests-sort {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
 #all-tests-view h2 {
     margin-bottom: 0;
     text-align: left;
@@ -2681,6 +2740,50 @@ p.error {
     z-index: 1000;
     animation: fadeIn 0.3s ease;
     padding: 0;
+}
+
+/* Confirm modal (custom replacement for window.confirm) */
+.confirm-modal-overlay {
+    align-items: center;
+    padding: 1rem;
+    z-index: 10001;
+}
+
+.confirm-modal-content {
+    width: 100%;
+    max-width: 520px;
+    border-radius: 16px;
+}
+
+.confirm-message {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    opacity: 0.95;
+    margin-bottom: 1.25rem;
+}
+
+.confirm-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.confirm-actions .action-btn {
+    min-width: 120px;
+    justify-content: center;
+}
+
+.confirm-ok-btn.danger {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    border: none;
+    color: #fff;
+}
+
+.confirm-ok-btn.danger:hover,
+.confirm-ok-btn.danger:active {
+    box-shadow: 0 8px 20px rgba(239, 68, 68, 0.35);
+    transform: translateY(-2px);
 }
 
 .modal-content {

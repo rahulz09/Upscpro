@@ -284,6 +284,20 @@ Subject: Science | Topic: Solar System
           <span class="material-symbols-outlined">upload_file</span> Import Single Test
       </button>
     </div>
+    <div class="list-controls">
+      <div class="search-box">
+        <span class="material-symbols-outlined">search</span>
+        <input id="all-tests-search" type="search" placeholder="Search tests..." autocomplete="off">
+      </div>
+      <select id="all-tests-sort" aria-label="Sort tests">
+        <option value="recent" selected>Newest</option>
+        <option value="oldest">Oldest</option>
+        <option value="name">Name (A→Z)</option>
+        <option value="questions">Most Questions</option>
+        <option value="duration">Longest Duration</option>
+      </select>
+    </div>
+    <div id="all-tests-stats" class="list-stats"></div>
     <div id="all-tests-container" class="all-tests-grid">
         <p class="placeholder">You haven't saved any tests yet.</p>
     </div>

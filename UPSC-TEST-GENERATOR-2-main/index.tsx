@@ -214,7 +214,7 @@ loginForm.addEventListener('submit', (e) => {
     if (result.success && result.user) {
         loginUser(result.user, remember);
     } else {
-        alert(result.message);
+        showToast(result.message, "error");
     }
 });
 
@@ -227,14 +227,14 @@ registerForm.addEventListener('submit', (e) => {
     const confirm = registerConfirmInput.value;
     
     if (password !== confirm) {
-        alert('Passwords do not match!');
+        showToast('Passwords do not match!', "error");
         return;
     }
     
     const result = registerUser(name, username, password);
     
     if (result.success) {
-        alert(result.message);
+        showToast(result.message, "success");
         // Auto-login after registration
         const authResult = authenticateUser(username, password);
         if (authResult.success && authResult.user) {
@@ -243,16 +243,21 @@ registerForm.addEventListener('submit', (e) => {
             showLoginForm();
         }
     } else {
-        alert(result.message);
+        showToast(result.message, "error");
     }
 });
 
 showRegisterBtn.addEventListener('click', showRegisterForm);
 backToLoginBtn.addEventListener('click', showLoginForm);
 logoutBtn.addEventListener('click', () => {
-    if (confirm('Are you sure you want to logout?')) {
-        logoutUser();
-    }
+    (async () => {
+        const ok = await showConfirm('Are you sure you want to logout?', {
+            title: 'Logout',
+            tone: 'danger',
+            confirmText: 'Logout'
+        });
+        if (ok) logoutUser();
+    })();
 });
 
 // Initialize auth check
@@ -316,6 +321,11 @@ const saveTestBtn = document.getElementById('save-test-btn');
 const allTestsContainer = document.getElementById('all-tests-container');
 const importTestBtn = document.getElementById('import-test-btn');
 const importTestInput = document.getElementById('import-test-input') as HTMLInputElement;
+const allTestsSearchInput = document.getElementById('all-tests-search') as HTMLInputElement | null;
+const allTestsSortSelect = document.getElementById('all-tests-sort') as HTMLSelectElement | null;
+const allTestsStats = document.getElementById('all-tests-stats');
+let allTestsQuery = '';
+let allTestsSort: 'recent' | 'oldest' | 'name' | 'questions' | 'duration' = 'recent';
 
 // Test Detail View Elements
 const testDetailContainer = document.getElementById('test-detail-container');
@@ -371,7 +381,7 @@ try {
     ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 } catch (e) {
     console.error("Failed to initialize GoogleGenAI", e);
-    alert("Error: Could not initialize AI. Please ensure API_KEY is set correctly.");
+    showToast("AI is not configured. Bulk Import (format-based) will still work.", "warning");
 }
 
 const questionSchema = {
@@ -417,7 +427,7 @@ restoreFileInput.addEventListener('change', (event) => {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
         try {
             const text = e.target?.result as string;
             let data;
@@ -434,7 +444,11 @@ restoreFileInput.addEventListener('change', (event) => {
             const isSingleTest = data.name && Array.isArray(data.questions);
 
             if (isBackup) {
-                if (confirm("This will merge the uploaded backup data with your current data. Duplicates will be handled automatically where possible. Continue?")) {
+                const ok = await showConfirm(
+                    "This will merge the uploaded backup data with your current data. Duplicates will be handled automatically where possible. Continue?",
+                    { title: "Restore backup", tone: "danger", confirmText: "Merge & Restore" }
+                );
+                if (ok) {
                     const currentTests = getFromStorage<Test[]>('tests', []);
                     const currentHistory = getFromStorage<TestAttempt[]>('performanceHistory', []);
                     
@@ -447,7 +461,7 @@ restoreFileInput.addEventListener('change', (event) => {
                     saveToStorage('tests', uniqueTests);
                     saveToStorage('performanceHistory', newHistory);
 
-                    alert("Data restored successfully!");
+                    showToast("Data restored successfully!", "success");
                     // Reload current view if necessary
                     if (!allTestsView.classList.contains('hidden')) renderAllTests();
                     if (!performanceView.classList.contains('hidden')) renderPerformanceHistory();
@@ -455,7 +469,8 @@ restoreFileInput.addEventListener('change', (event) => {
                 }
             } 
             else if (isSingleTest) {
-                if (confirm(`This file appears to be a single test: "${data.name}". Would you like to import it?`)) {
+                const ok = await showConfirm(`Import this test?\n\n"${data.name}"`, { title: "Import test", confirmText: "Import" });
+                if (ok) {
                      const newTest: Test = {
                         ...data,
                         id: `test_${Date.now()}_restored`, // Ensure unique ID to prevent conflicts
@@ -466,7 +481,7 @@ restoreFileInput.addEventListener('change', (event) => {
                     tests.unshift(newTest);
                     saveToStorage('tests', tests);
 
-                    alert(`Test "${data.name}" imported successfully!`);
+                    showToast(`Imported "${data.name}"`, "success");
                     if (!allTestsView.classList.contains('hidden')) renderAllTests();
                 }
             } 
@@ -476,7 +491,7 @@ restoreFileInput.addEventListener('change', (event) => {
 
         } catch (error) {
             console.error("Error restoring data:", error);
-            alert(`Failed to restore data. ${error.message}`);
+            showToast(`Restore failed: ${error.message}`, "error");
         } finally {
             input.value = ''; // Reset input
         }
@@ -556,7 +571,12 @@ document.addEventListener('click', async (e) => {
             e.preventDefault();
             const timerWasRunning = timerInterval !== null;
             if (timerWasRunning) stopTimer();
-            if (confirm("Are you sure you want to abandon this test? Your progress will be lost.")) {
+            const ok = await showConfirm("Are you sure you want to abandon this test? Your progress will be lost.", {
+                title: "Abandon test",
+                tone: "danger",
+                confirmText: "Abandon"
+            });
+            if (ok) {
                 currentTest = null;
                 showView(allTestsView);
             } else {
@@ -639,6 +659,12 @@ tabs.forEach(tab => {
         
         const tabName = tab.getAttribute('data-tab');
         activeTabInput.type = tabName;
+        // Update CTA label: Bulk Import works without AI
+        if (tabName === 'manual') {
+            generateTestBtn.textContent = 'Create Test (No AI)';
+        } else {
+            generateTestBtn.textContent = 'Generate Test';
+        }
 
         tabPanes.forEach(pane => {
             if (pane.id === `${tabName}-content`) {
@@ -656,23 +682,179 @@ questionsSlider.addEventListener('input', () => {
 
 // Clear text button functionality
 document.querySelectorAll('.clear-text-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
         const targetId = (e.currentTarget as HTMLElement).getAttribute('data-target');
         if (targetId) {
             const targetElement = document.getElementById(targetId) as HTMLTextAreaElement;
-            if (targetElement && confirm('Are you sure you want to clear this text?')) {
-                targetElement.value = '';
-                targetElement.focus();
-            }
+            if (!targetElement) return;
+            const ok = await showConfirm('Clear this text?', { title: 'Clear text', tone: 'danger', confirmText: 'Clear' });
+            if (!ok) return;
+            targetElement.value = '';
+            targetElement.focus();
+            showToast("Cleared", "info");
         }
     });
 });
 
 generateTestBtn.addEventListener('click', handleGenerateTest);
 
+function normalizeNewlines(text: string): string {
+    return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function isQuestionStart(line: string): boolean {
+    return /^\s*(?:\d+\s*[\.\)]\s+|q\s*\d*\s*[:\.\)]\s+)/i.test(line);
+}
+
+function extractAnswerIndex(raw: string): number | null {
+    const v = raw.trim();
+    if (!v) return null;
+    const letterMatch = v.match(/[a-d]/i);
+    if (letterMatch) return letterMatch[0].toLowerCase().charCodeAt(0) - 97;
+    const numMatch = v.match(/\b([1-4])\b/);
+    if (numMatch) return parseInt(numMatch[1], 10) - 1;
+    return null;
+}
+
+function parseOptionsFromText(optionsText: string): string[] {
+    const out: string[] = [];
+    const re = /(?:^|\s)([a-d])\)\s*([\s\S]*?)(?=(?:\s+[a-d]\)\s)|$)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(optionsText)) !== null) {
+        const opt = (m[2] || '').trim().replace(/\s+/g, ' ');
+        if (opt) out.push(opt);
+    }
+    return out;
+}
+
+function parseBulkImportQuestions(text: string): Question[] {
+    const lines = normalizeNewlines(text).split('\n');
+    const blocks: string[][] = [];
+    let current: string[] = [];
+
+    for (const line of lines) {
+        if (isQuestionStart(line) && current.length) {
+            blocks.push(current);
+            current = [line];
+        } else {
+            if (line.trim() === '' && current.length === 0) continue;
+            current.push(line);
+        }
+    }
+    if (current.length) blocks.push(current);
+
+    const questions: Question[] = [];
+    for (const blockLines of blocks) {
+        const firstLine = blockLines.find(l => l.trim().length > 0) || '';
+        const questionText = firstLine
+            .replace(/^\s*(?:\d+\s*[\.\)]\s+|q\s*\d*\s*[:\.\)]\s+)/i, '')
+            .trim();
+        if (!questionText) continue;
+
+        const answerLine = blockLines.find(l => /^\s*(answer|ans)\s*:/i.test(l)) || '';
+        const explanationStartIdx = blockLines.findIndex(l => /^\s*explanation\s*:/i.test(l));
+        const subjectLineIdx = blockLines.findIndex(l => /^\s*subject\s*:/i.test(l));
+        const topicLineIdx = blockLines.findIndex(l => /^\s*topic\s*:/i.test(l));
+
+        const answerRaw = answerLine.replace(/^\s*(answer|ans)\s*:\s*/i, '').trim();
+        const answerIndex = extractAnswerIndex(answerRaw);
+
+        const firstLabelIdx = [blockLines.findIndex(l => /^\s*(answer|ans)\s*:/i.test(l)), explanationStartIdx, subjectLineIdx, topicLineIdx]
+            .filter(i => i >= 0)
+            .sort((a, b) => a - b)[0];
+
+        const questionLineIdx = blockLines.indexOf(firstLine);
+        const optionsLines = blockLines.slice(questionLineIdx + 1, (firstLabelIdx ?? blockLines.length));
+        const optionsText = optionsLines.join(' ').replace(/\s+/g, ' ').trim();
+        const options = parseOptionsFromText(optionsText);
+
+        let explanation = '';
+        if (explanationStartIdx >= 0) {
+            const after = blockLines.slice(explanationStartIdx);
+            after[0] = after[0].replace(/^\s*explanation\s*:\s*/i, '');
+            const cutAt = after.findIndex((l, idx) => idx !== 0 && /^\s*(subject|topic)\s*:/i.test(l));
+            const expLines = (cutAt >= 0 ? after.slice(0, cutAt) : after);
+            explanation = expLines.join('\n').trim();
+        }
+
+        let subject = 'Uncategorized';
+        let topic = 'General';
+        const subjectLine = subjectLineIdx >= 0 ? blockLines[subjectLineIdx] : '';
+        const topicLine = topicLineIdx >= 0 ? blockLines[topicLineIdx] : '';
+
+        if (subjectLine) {
+            const parts = subjectLine.split('|').map(x => x.trim());
+            for (const part of parts) {
+                const ms = part.match(/^\s*subject\s*:\s*(.+)\s*$/i);
+                if (ms?.[1]) subject = ms[1].trim();
+                const mt = part.match(/^\s*topic\s*:\s*(.+)\s*$/i);
+                if (mt?.[1]) topic = mt[1].trim();
+            }
+            if (parts.length === 1) {
+                const s = subjectLine.replace(/^\s*subject\s*:\s*/i, '').trim();
+                if (s) subject = s;
+            }
+        }
+        if (topicLine) {
+            const t = topicLine.replace(/^\s*topic\s*:\s*/i, '').trim();
+            if (t) topic = t;
+        }
+
+        if (options.length !== 4) {
+            throw new Error(`Bulk Import format error near: "${questionText.slice(0, 60)}..." (Expected 4 options a) b) c) d))`);
+        }
+        if (answerIndex === null || answerIndex < 0 || answerIndex > 3) {
+            throw new Error(`Bulk Import format error near: "${questionText.slice(0, 60)}..." (Answer must be a/b/c/d or 1/2/3/4)`);
+        }
+        if (!explanation) explanation = "Explanation not provided.";
+
+        questions.push({
+            question: questionText,
+            options,
+            answer: answerIndex,
+            explanation,
+            subject,
+            topic
+        });
+    }
+
+    if (questions.length === 0) {
+        throw new Error("No questions found. Please follow the example format (numbered questions + a) b) c) d) + Answer: ...).");
+    }
+    return questions;
+}
+
+const API_BASE_URL = String((import.meta as any)?.env?.VITE_API_BASE_URL || '').trim();
+
+function buildApiUrl(path: string): string {
+    if (!API_BASE_URL) return path;
+    return `${API_BASE_URL.replace(/\/+$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
+async function tryGenerateQuestionsViaBackend(contentsForApi: any): Promise<Question[] | null> {
+    try {
+        // Expected backend contract:
+        // POST /api/upsc/generate-questions
+        // Body: { contents: <string | {parts: ...}>, model?: string }
+        // Response: Question[]
+        const res = await fetch(buildApiUrl('/api/upsc/generate-questions'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: contentsForApi, model: 'gemini-2.5-flash' })
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!Array.isArray(data) || data.length === 0) return null;
+        return data as Question[];
+    } catch {
+        return null;
+    }
+}
+
 async function handleGenerateTest() {
-    if (!ai) {
-        alert("AI Service is not available.");
+    const isManualBulk = activeTabInput.type === 'manual';
+    if (!ai && !API_BASE_URL && !isManualBulk) {
+        showToast("AI not available. Use Bulk Import (No AI) or connect backend (VITE_API_BASE_URL).", "warning");
         return;
     }
 
@@ -708,22 +890,30 @@ async function handleGenerateTest() {
                 const manualText = manualInput.value.trim();
                 if (!manualText) throw new Error('Please paste your questions in the text area.');
                 source = "Bulk Import";
-                const promptManual = `Analyze the following text and extract ALL multiple-choice questions found within it.
-                
-                The text is expected to contain questions in a format similar to:
-                "Q. Question text... A) Opt1 B) Opt2... Answer: A Explanation: ..."
-                
-                Your task:
-                1. Extract every valid question.
-                2. Map options to a string array.
-                3. Determine the correct answer index (0 for A/1, 1 for B/2, etc).
-                4. Extract explanation if present, otherwise generate a brief one.
-                5. Extract Subject and Topic if present, otherwise infer them from the question content.
-                6. Return the result strictly as a JSON array matching the schema.
-                
-                Input Text:
-                """${manualText}"""`;
-                contentsForApi = promptManual;
+                // No-AI path: parse example format locally
+                const parsed = parseBulkImportQuestions(manualText);
+                const finalQuestions = parsed.slice(0, numQuestions);
+
+                if (parsed.length > numQuestions) {
+                    showToast(`Imported ${finalQuestions.length}/${parsed.length} questions (slider limit).`, "info");
+                } else {
+                    showToast(`Imported ${finalQuestions.length} questions.`, "success");
+                }
+
+                currentTest = {
+                    id: `test_${Date.now()}`,
+                    name: testName || `Test on ${source}`,
+                    questions: finalQuestions,
+                    duration: parseInt(durationInput.value, 10),
+                    language: language,
+                    createdAt: new Date().toISOString(),
+                    marksPerQuestion: marks,
+                    negativeMarking: negative
+                };
+
+                renderEditableTest(currentTest);
+                showView(editTestView);
+                return;
                 break;
             case 'file':
                 const file = fileUpload.files[0];
@@ -780,31 +970,38 @@ async function handleGenerateTest() {
                 break;
         }
 
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: contentsForApi,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: questionSchema,
+        const backendQuestions = await tryGenerateQuestionsViaBackend(contentsForApi);
+        let parsedResponse: any = backendQuestions;
+
+        if (!parsedResponse) {
+            if (!ai) throw new Error("Backend not reachable and AI key not configured.");
+
+            const response = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: contentsForApi,
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: Type.ARRAY,
+                        items: questionSchema,
+                    },
                 },
-            },
-        });
+            });
 
-        if (!response || !response.text) {
-            console.error("Invalid AI Response:", response);
-            const finishReason = response?.candidates?.[0]?.finishReason;
-            let errorMessage = "AI did not return a valid response. It might be empty or malformed.";
-            if (finishReason === 'SAFETY') {
-                errorMessage = "The request was blocked due to safety concerns. Please adjust your input text or file.";
-            } else if (finishReason) {
-                errorMessage = `Generation failed. Reason: ${finishReason}.`;
+            if (!response || !response.text) {
+                console.error("Invalid AI Response:", response);
+                const finishReason = response?.candidates?.[0]?.finishReason;
+                let errorMessage = "AI did not return a valid response. It might be empty or malformed.";
+                if (finishReason === 'SAFETY') {
+                    errorMessage = "The request was blocked due to safety concerns. Please adjust your input text or file.";
+                } else if (finishReason) {
+                    errorMessage = `Generation failed. Reason: ${finishReason}.`;
+                }
+                throw new Error(errorMessage);
             }
-            throw new Error(errorMessage);
-        }
 
-        const parsedResponse = JSON.parse(response.text);
+            parsedResponse = JSON.parse(response.text);
+        }
 
         if (!Array.isArray(parsedResponse) || parsedResponse.length === 0) {
             throw new Error("Invalid response format from AI. The generated content was not a valid list of questions.");
@@ -825,7 +1022,7 @@ async function handleGenerateTest() {
         showView(editTestView);
     } catch (error) {
         console.error("Error generating test:", error);
-        alert(`Failed to generate test. ${error.message}`);
+        showToast(`Failed: ${error.message}`, "error");
     } finally {
         (loader.querySelector('p') as HTMLElement).textContent = 'Generating your test, please wait...';
         loader.classList.add('hidden');
@@ -906,13 +1103,20 @@ editableQuestionsContainer.addEventListener('click', (e) => {
         e.stopPropagation();
         const item = deleteBtn.closest('.editable-question-item') as HTMLElement;
         const index = parseInt(item.dataset.questionIndex, 10);
-        if (confirm(`Are you sure you want to delete question ${index + 1}?`)) {
+        (async () => {
+            const ok = await showConfirm(`Delete question ${index + 1}?`, {
+                title: "Delete question",
+                tone: "danger",
+                confirmText: "Delete"
+            });
+            if (!ok) return;
             // Update currentTest data
             // We need to sync DOM state to data first before splicing to avoid losing unsaved edits
             syncCurrentTestFromDOM(); 
             currentTest.questions.splice(index, 1);
-            renderEditableTest(currentTest); 
-        }
+            renderEditableTest(currentTest);
+            showToast("Question deleted", "success");
+        })();
         return;
     }
 
@@ -1010,10 +1214,10 @@ saveTestBtn.addEventListener('click', () => {
     
     if (existingIndex > -1) {
         tests[existingIndex] = currentTest;
-        alert('Test updated successfully!');
+        showToast('Test updated', 'success');
     } else {
         tests.unshift(currentTest);
-        alert('Test created successfully!');
+        showToast('Test created', 'success');
     }
     
     saveToStorage('tests', tests);
@@ -1027,11 +1231,48 @@ function renderAllTests() {
     const tests = getFromStorage<Test[]>('tests', []);
     if (tests.length === 0) {
         allTestsContainer.innerHTML = `<p class="placeholder">You haven't saved any tests yet.</p>`;
+        if (allTestsStats) allTestsStats.textContent = '';
         return;
     }
-    allTestsContainer.innerHTML = tests.map(test => {
+
+    const filtered = !allTestsQuery
+        ? tests
+        : tests.filter(t => (t.name || '').toLowerCase().includes(allTestsQuery));
+
+    const sorted = [...filtered].sort((a, b) => {
+        const aTime = new Date(a.createdAt).getTime() || 0;
+        const bTime = new Date(b.createdAt).getTime() || 0;
+        switch (allTestsSort) {
+            case 'oldest':
+                return aTime - bTime;
+            case 'name':
+                return (a.name || '').localeCompare(b.name || '');
+            case 'questions':
+                return (b.questions?.length || 0) - (a.questions?.length || 0);
+            case 'duration':
+                return (b.duration || 0) - (a.duration || 0);
+            case 'recent':
+            default:
+                return bTime - aTime;
+        }
+    });
+
+    if (allTestsStats) {
+        allTestsStats.textContent = filtered.length === tests.length
+            ? `${sorted.length} tests`
+            : `${sorted.length} of ${tests.length} tests`;
+    }
+
+    if (sorted.length === 0) {
+        allTestsContainer.innerHTML = `<p class="placeholder">No tests match your search.</p>`;
+        return;
+    }
+
+    allTestsContainer.innerHTML = sorted.map(test => {
         const dateObj = new Date(test.createdAt);
         const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        const marksPerQ = test.marksPerQuestion ?? 1;
+        const neg = test.negativeMarking ?? 0;
         
         return `
         <div class="saved-test-item" data-testid="${test.id}">
@@ -1045,6 +1286,12 @@ function renderAllTests() {
                  </div>
                  <div class="stat-pill">
                     <span class="material-symbols-outlined">timer</span> ${test.duration} mins
+                 </div>
+                 <div class="stat-pill">
+                    <span class="material-symbols-outlined">functions</span> +${marksPerQ}
+                 </div>
+                 <div class="stat-pill">
+                    <span class="material-symbols-outlined">trending_down</span> -${neg}
                  </div>
             </div>
             <div class="test-card-actions">
@@ -1082,12 +1329,18 @@ function handleDownloadTest(test: Test) {
     URL.revokeObjectURL(url);
 }
 
-function handleDeleteTest(testId: string) {
-    if (confirm("Are you sure you want to delete this test?")) {
+async function handleDeleteTest(testId: string) {
+    const ok = await showConfirm("Are you sure you want to delete this test?", {
+        title: "Delete test",
+        tone: "danger",
+        confirmText: "Delete"
+    });
+    if (ok) {
         let tests = getFromStorage<Test[]>('tests', []);
         tests = tests.filter(t => t.id !== testId);
         saveToStorage('tests', tests);
         renderAllTests(); // Re-render the list
+        showToast("Test deleted", "success");
     }
 }
 
@@ -1136,19 +1389,19 @@ function handleImportTest(event: Event) {
             tests.unshift(newTest);
             saveToStorage('tests', tests);
 
-            alert(`Test "${newTest.name}" imported successfully!`);
+            showToast(`Imported "${newTest.name}"`, "success");
             renderAllTests();
 
         } catch (error) {
             console.error("Error importing test:", error);
-            alert(`Failed to import test. ${error.message}`);
+            showToast(`Import failed: ${error.message}`, "error");
         } finally {
             // Reset input value to allow re-uploading the same file
             input.value = '';
         }
     };
     reader.onerror = () => {
-         alert('Error reading the file.');
+         showToast('Error reading the file.', "error");
          input.value = '';
     };
     reader.readAsText(file);
@@ -1157,7 +1410,18 @@ function handleImportTest(event: Event) {
 importTestBtn.addEventListener('click', () => importTestInput.click());
 importTestInput.addEventListener('change', handleImportTest);
 
-allTestsContainer.addEventListener('click', e => {
+allTestsSearchInput?.addEventListener('input', () => {
+    allTestsQuery = (allTestsSearchInput.value || '').trim().toLowerCase();
+    renderAllTests();
+});
+
+allTestsSortSelect?.addEventListener('change', () => {
+    const v = (allTestsSortSelect.value || 'recent') as any;
+    allTestsSort = v;
+    renderAllTests();
+});
+
+allTestsContainer.addEventListener('click', async e => {
     const target = e.target as HTMLElement;
     const testItem = target.closest('.saved-test-item') as HTMLElement;
     if (!testItem) return;
@@ -1173,7 +1437,7 @@ allTestsContainer.addEventListener('click', e => {
     } else if (target.closest('.download-test-btn')) {
         handleDownloadTest(test);
     } else if (target.closest('.delete-btn')) {
-        handleDeleteTest(testId);
+        await handleDeleteTest(testId);
     } else if (target.closest('.edit-btn')) {
         handleEditTest(test);
     } else {
@@ -1208,7 +1472,7 @@ function renderTestDetail(test: Test) {
     `).join('');
 }
 
-testDetailActions.addEventListener('click', e => {
+testDetailActions.addEventListener('click', async e => {
     if (!currentTest) return;
     const target = e.target as HTMLElement;
 
@@ -1216,11 +1480,16 @@ testDetailActions.addEventListener('click', e => {
         startTest(currentTest);
     }
     if (target.closest('#delete-test-btn')) {
-        if (confirm(`Are you sure you want to delete the test "${currentTest.name}"? This action cannot be undone.`)) {
+        const ok = await showConfirm(`Delete "${currentTest.name}"? This action cannot be undone.`, {
+            title: "Delete test",
+            tone: "danger",
+            confirmText: "Delete"
+        });
+        if (ok) {
             let tests = getFromStorage<Test[]>('tests', []);
             tests = tests.filter(t => t.id !== currentTest.id);
             saveToStorage('tests', tests);
-            alert('Test deleted.');
+            showToast('Test deleted', 'success');
             renderAllTests();
             showView(allTestsView);
         }
@@ -1403,6 +1672,76 @@ function showToast(message: string, type: 'info' | 'success' | 'warning' | 'erro
     }, 2500);
 }
 
+type ConfirmOptions = {
+    title?: string;
+    confirmText?: string;
+    cancelText?: string;
+    tone?: 'default' | 'danger';
+};
+
+function showConfirm(message: string, options: ConfirmOptions = {}): Promise<boolean> {
+    const {
+        title = "Confirm",
+        confirmText = "Confirm",
+        cancelText = "Cancel",
+        tone = "default",
+    } = options;
+
+    return new Promise((resolve) => {
+        // Cleanup any existing confirm modal
+        document.querySelectorAll('.confirm-modal-overlay').forEach(el => el.remove());
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay confirm-modal-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+
+        const content = document.createElement('div');
+        content.className = 'modal-content confirm-modal-content';
+        content.innerHTML = `
+            <div class="modal-header">
+                <h3>${title}</h3>
+                <button class="close-btn confirm-cancel-btn" aria-label="Close"><span class="material-symbols-outlined">close</span></button>
+            </div>
+            <div class="confirm-message">${String(message).replace(/\n/g, '<br/>')}</div>
+            <div class="confirm-actions">
+                <button class="action-btn confirm-cancel-btn">${cancelText}</button>
+                <button class="action-btn confirm-ok-btn ${tone === 'danger' ? 'danger' : ''}">${confirmText}</button>
+            </div>
+        `;
+
+        overlay.appendChild(content);
+        document.body.appendChild(overlay);
+
+        const cleanup = () => {
+            window.removeEventListener('keydown', onKeyDown);
+            overlay.remove();
+        };
+
+        const finish = (value: boolean) => {
+            cleanup();
+            resolve(value);
+        };
+
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') finish(false);
+        };
+        window.addEventListener('keydown', onKeyDown);
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) finish(false);
+        });
+
+        (content.querySelectorAll('.confirm-cancel-btn') as NodeListOf<HTMLElement>).forEach(btn => {
+            btn.addEventListener('click', () => finish(false));
+        });
+        (content.querySelector('.confirm-ok-btn') as HTMLElement | null)?.addEventListener('click', () => finish(true));
+
+        // Focus primary action
+        (content.querySelector('.confirm-ok-btn') as HTMLButtonElement | null)?.focus();
+    });
+}
+
 const prevBtn = document.getElementById('prev-btn') as HTMLButtonElement;
 
 saveNextBtn.addEventListener('click', () => navigateToQuestion(currentQuestionIndex + 1));
@@ -1438,7 +1777,7 @@ function handleSubmitTest() {
 
         if (!currentTest) {
             console.error("Submission failed: currentTest is not available.");
-            alert("A critical error occurred: Test data is missing. Unable to submit.");
+            showToast("Critical error: test data is missing. Returning to home.", "error");
             showView(mainView); // Go back to the main menu for safety
             return;
         }
@@ -1494,7 +1833,7 @@ function handleSubmitTest() {
 
     } catch (error) {
         console.error("An unexpected error occurred during test submission:", error);
-        alert("An unexpected error occurred while submitting your test. Your progress could not be saved.");
+        showToast("Submit failed. Your progress could not be saved.", "error");
         showView(mainView); // Fallback to main view on error
     }
 }
@@ -1511,7 +1850,7 @@ function startTimer() {
         
         if (timeRemaining <= 0) {
             stopTimer();
-            alert("Time's up! Your test will be submitted automatically.");
+            showToast("Time's up! Submitting automatically…", "warning");
             handleSubmitTest();
         }
     }, 1000);
@@ -1530,7 +1869,47 @@ function renderPerformanceHistory() {
         return;
     }
 
-    performanceContainer.innerHTML = history.map((attempt, index) => {
+    const totalTests = history.length;
+    const avgScore = history.reduce((s, a) => s + (a.score || 0), 0) / totalTests;
+    const bestScore = Math.max(...history.map(a => a.score || 0));
+    const totalTimeTaken = history.reduce((s, a) => s + (a.timeTaken || 0), 0);
+    const totalHours = Math.floor(totalTimeTaken / 3600);
+    const totalMinutes = Math.floor((totalTimeTaken % 3600) / 60);
+
+    const summaryHtml = `
+        <div class="results-summary-container">
+            <div class="summary-card score">
+                <div class="summary-icon"><span class="material-symbols-outlined">percent</span></div>
+                <div class="summary-data">
+                    <div class="summary-value">${avgScore.toFixed(1)}%</div>
+                    <div class="summary-label">Avg Score</div>
+                </div>
+            </div>
+            <div class="summary-card correct">
+                <div class="summary-icon"><span class="material-symbols-outlined">emoji_events</span></div>
+                <div class="summary-data">
+                    <div class="summary-value">${bestScore.toFixed(1)}%</div>
+                    <div class="summary-label">Best</div>
+                </div>
+            </div>
+            <div class="summary-card time">
+                <div class="summary-icon"><span class="material-symbols-outlined">timer</span></div>
+                <div class="summary-data">
+                    <div class="summary-value">${totalHours}h ${totalMinutes}m</div>
+                    <div class="summary-label">Total Time</div>
+                </div>
+            </div>
+            <div class="summary-card unanswered">
+                <div class="summary-icon"><span class="material-symbols-outlined">history</span></div>
+                <div class="summary-data">
+                    <div class="summary-value">${totalTests}</div>
+                    <div class="summary-label">Tests</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const listHtml = history.map((attempt, index) => {
         const dateObj = new Date(attempt.completedAt);
         const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
         const time = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
@@ -1565,6 +1944,8 @@ function renderPerformanceHistory() {
             </button>
         </div>
     `}).join('');
+
+    performanceContainer.innerHTML = summaryHtml + listHtml;
 }
 
 performanceContainer.addEventListener('click', (e) => {
@@ -2094,7 +2475,7 @@ function renderTopicWiseAnalysis(attempt: TestAttempt) {
                         </div>
                         <div class="topic-chart-bar-container">
                             <div class="topic-chart-bar" style="width: ${t.accuracy}%; background: ${barColor}"></div>
-                            <span class="topic-chart-value">${t.correct}/${t.total} (${t.accuracy.toFixed(0)}%)</span>
+                            <span class="topic-chart-value">${t.correct}/${t.total} (${t.accuracy.toFixed(0)}%) • ${t.avgTime.toFixed(0)}s avg</span>
                         </div>
                     </div>
                 `;
@@ -2715,6 +3096,9 @@ function renderAnalyticsDashboard() {
 
 // Score Trend Graph
 function renderScoreTrendGraph(sortedHistory: TestAttempt[]) {
+    // Prevent duplicate cards when dashboard re-renders
+    document.querySelectorAll('.score-trend-card').forEach(el => el.remove());
+
     const trendContainer = document.createElement('div');
     trendContainer.className = 'report-card score-trend-card';
     trendContainer.innerHTML = `
