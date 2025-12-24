@@ -120,10 +120,15 @@
           <span class="material-symbols-outlined">account_circle</span>
           <span id="user-display-name">User</span>
         </div>
-        <button id="logout-btn" class="logout-btn" title="Logout">
-          <span class="material-symbols-outlined">logout</span>
-          <span>Logout</span>
-        </button>
+        <div class="user-actions">
+          <button id="settings-btn" class="icon-btn" title="Settings">
+            <span class="material-symbols-outlined">settings</span>
+          </button>
+          <button id="logout-btn" class="logout-btn" title="Logout">
+            <span class="material-symbols-outlined">logout</span>
+            <span>Logout</span>
+          </button>
+        </div>
       </div>
       <div class="header-title-container">
         <h1><span class="gradient-text">UPSC Test Generator</span></h1>
@@ -284,6 +289,28 @@ Subject: Science | Topic: Solar System
           <span class="material-symbols-outlined">upload_file</span> Import Single Test
       </button>
     </div>
+    
+    <!-- Search and Filter Bar -->
+    <div class="search-filter-bar">
+      <div class="search-box">
+        <span class="material-symbols-outlined">search</span>
+        <input type="text" id="test-search-input" placeholder="Search tests by name...">
+      </div>
+      <div class="filter-controls">
+        <select id="test-sort-select">
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+          <option value="name-asc">Name (A-Z)</option>
+          <option value="name-desc">Name (Z-A)</option>
+          <option value="questions-desc">Most Questions</option>
+          <option value="questions-asc">Least Questions</option>
+        </select>
+      </div>
+    </div>
+    
+    <!-- Tests Stats Overview -->
+    <div id="tests-stats-overview" class="tests-stats-overview"></div>
+    
     <div id="all-tests-container" class="all-tests-grid">
         <p class="placeholder">You haven't saved any tests yet.</p>
     </div>
@@ -417,6 +444,104 @@ Subject: Science | Topic: Solar System
       </div>
       <div id="modal-body">
          <!-- Dynamic Content -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal-content settings-modal">
+      <div class="modal-header">
+        <h3><span class="material-symbols-outlined">settings</span> Settings & Configuration</h3>
+        <button id="close-settings-btn" class="close-btn"><span class="material-symbols-outlined">close</span></button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-section">
+          <h4><span class="material-symbols-outlined">cloud</span> Backend Configuration</h4>
+          <p class="settings-description">Configure API keys and backend settings for AI features</p>
+          
+          <div class="setting-item">
+            <label for="api-key-input">
+              <span class="material-symbols-outlined">key</span>
+              Google Gemini API Key
+            </label>
+            <div class="input-with-action">
+              <input type="password" id="api-key-input" placeholder="Enter your Gemini API key" autocomplete="off">
+              <button type="button" id="toggle-api-key" class="icon-btn-small" title="Show/Hide">
+                <span class="material-symbols-outlined">visibility</span>
+              </button>
+            </div>
+            <small>Get your API key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></small>
+          </div>
+
+          <div class="setting-item">
+            <label>
+              <span class="material-symbols-outlined">lightbulb</span>
+              Quick Start Guide
+            </label>
+            <div class="info-box">
+              <p><strong>For Replit Users:</strong></p>
+              <ol>
+                <li>Get your free API key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></li>
+                <li>Click the "Secrets" tab in Replit sidebar</li>
+                <li>Add: Key = <code>API_KEY</code>, Value = <code>your-api-key</code></li>
+                <li>Reload the page</li>
+              </ol>
+              <p><strong>For Local Development:</strong></p>
+              <ol>
+                <li>Create a <code>.env</code> file in the project root</li>
+                <li>Add: <code>API_KEY=your-api-key-here</code></li>
+                <li>Restart the dev server</li>
+              </ol>
+            </div>
+          </div>
+
+          <button id="save-settings-btn" class="action-btn save-btn">
+            <span class="material-symbols-outlined">save</span> Save Settings
+          </button>
+        </div>
+
+        <div class="settings-section">
+          <h4><span class="material-symbols-outlined">storage</span> Data Management</h4>
+          <p class="settings-description">Backup and restore your data</p>
+          
+          <div class="settings-actions-grid">
+            <button id="export-data-btn" class="action-btn">
+              <span class="material-symbols-outlined">download</span>
+              Export All Data
+            </button>
+            <button id="import-data-btn" class="action-btn">
+              <span class="material-symbols-outlined">upload</span>
+              Import Data
+            </button>
+            <button id="clear-data-btn" class="action-btn" style="background: var(--danger-color);">
+              <span class="material-symbols-outlined">delete_forever</span>
+              Clear All Data
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4><span class="material-symbols-outlined">info</span> App Information</h4>
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">Version:</span>
+              <span class="info-value">2.0.0</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Storage Used:</span>
+              <span class="info-value" id="storage-used">Calculating...</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Tests Created:</span>
+              <span class="info-value" id="total-tests">0</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Tests Completed:</span>
+              <span class="info-value" id="total-attempts">0</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -352,6 +352,17 @@ const closeModalBtn = document.getElementById('close-modal-btn');
 const modalSubjectTitle = document.getElementById('modal-subject-title');
 const modalBody = document.getElementById('modal-body');
 
+// Settings Modal Elements
+const settingsBtn = document.getElementById('settings-btn');
+const settingsModal = document.getElementById('settings-modal');
+const closeSettingsBtn = document.getElementById('close-settings-btn');
+const apiKeyInput = document.getElementById('api-key-input') as HTMLInputElement;
+const toggleApiKeyBtn = document.getElementById('toggle-api-key');
+const saveSettingsBtn = document.getElementById('save-settings-btn');
+const exportDataBtn = document.getElementById('export-data-btn');
+const importDataBtn = document.getElementById('import-data-btn');
+const clearDataBtn = document.getElementById('clear-data-btn');
+
 // --- Test State ---
 let currentTest: Test | null = null;
 let currentQuestionIndex = 0;
@@ -367,12 +378,25 @@ let reportReturnView: HTMLElement = performanceView;
 
 // --- Gemini AI ---
 let ai: GoogleGenAI;
-try {
-    ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-} catch (e) {
-    console.error("Failed to initialize GoogleGenAI", e);
-    alert("Error: Could not initialize AI. Please ensure API_KEY is set correctly.");
+let userApiKey: string = '';
+
+function initializeAI() {
+    // Try to get API key from environment or localStorage
+    userApiKey = localStorage.getItem('userApiKey') || process.env.API_KEY || '';
+    
+    if (userApiKey) {
+        try {
+            ai = new GoogleGenAI({ apiKey: userApiKey });
+            console.log("AI initialized successfully");
+        } catch (e) {
+            console.error("Failed to initialize GoogleGenAI", e);
+        }
+    } else {
+        console.warn("No API key found. Please configure in Settings.");
+    }
 }
+
+initializeAI();
 
 const questionSchema = {
     type: Type.OBJECT,
@@ -538,6 +562,121 @@ analyticsModal.addEventListener('click', (e) => {
     }
 });
 
+// --- Settings Modal Handlers ---
+settingsBtn.addEventListener('click', () => {
+    // Load current settings
+    const savedApiKey = localStorage.getItem('userApiKey') || '';
+    apiKeyInput.value = savedApiKey;
+    
+    // Update stats
+    const tests = getFromStorage<Test[]>('tests', []);
+    const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+    document.getElementById('total-tests').textContent = tests.length.toString();
+    document.getElementById('total-attempts').textContent = history.length.toString();
+    
+    // Calculate storage
+    const storageStr = JSON.stringify({ tests, performanceHistory: history });
+    const storageSizeKB = (new Blob([storageStr]).size / 1024).toFixed(2);
+    document.getElementById('storage-used').textContent = `${storageSizeKB} KB`;
+    
+    settingsModal.classList.remove('hidden');
+});
+
+closeSettingsBtn.addEventListener('click', () => {
+    settingsModal.classList.add('hidden');
+});
+
+settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) {
+        settingsModal.classList.add('hidden');
+    }
+});
+
+toggleApiKeyBtn.addEventListener('click', () => {
+    const icon = toggleApiKeyBtn.querySelector('.material-symbols-outlined');
+    if (apiKeyInput.type === 'password') {
+        apiKeyInput.type = 'text';
+        icon.textContent = 'visibility_off';
+    } else {
+        apiKeyInput.type = 'password';
+        icon.textContent = 'visibility';
+    }
+});
+
+saveSettingsBtn.addEventListener('click', () => {
+    const newApiKey = apiKeyInput.value.trim();
+    
+    if (newApiKey) {
+        localStorage.setItem('userApiKey', newApiKey);
+        userApiKey = newApiKey;
+        
+        // Reinitialize AI with new key
+        try {
+            ai = new GoogleGenAI({ apiKey: userApiKey });
+            alert('✅ Settings saved successfully! AI is now configured.');
+        } catch (e) {
+            alert('⚠️ Settings saved, but failed to initialize AI. Please check your API key.');
+            console.error('AI initialization error:', e);
+        }
+    } else {
+        localStorage.removeItem('userApiKey');
+        userApiKey = '';
+        alert('⚠️ API key removed. AI features will be disabled.');
+    }
+    
+    settingsModal.classList.add('hidden');
+});
+
+exportDataBtn.addEventListener('click', () => {
+    const tests = getFromStorage<Test[]>('tests', []);
+    const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+    const users = getUsers();
+    
+    const backupData = {
+        version: '2.0.0',
+        exportDate: new Date().toISOString(),
+        tests,
+        performanceHistory: history,
+        users
+    };
+    
+    const jsonString = JSON.stringify(backupData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const fileName = `upsc-test-backup-${new Date().toISOString().split('T')[0]}.json`;
+    
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    alert('✅ Data exported successfully!');
+});
+
+importDataBtn.addEventListener('click', () => {
+    restoreFileInput.click();
+});
+
+clearDataBtn.addEventListener('click', () => {
+    if (confirm('⚠️ WARNING: This will delete ALL your tests, performance history, and data. This action cannot be undone!\n\nAre you absolutely sure?')) {
+        if (confirm('Final confirmation: Delete everything?')) {
+            localStorage.removeItem('tests');
+            localStorage.removeItem('performanceHistory');
+            
+            alert('🗑️ All data has been cleared.');
+            settingsModal.classList.add('hidden');
+            
+            // Refresh current view
+            if (!allTestsView.classList.contains('hidden')) renderAllTests();
+            if (!performanceView.classList.contains('hidden')) renderPerformanceHistory();
+            if (!analyticsView.classList.contains('hidden')) renderAnalyticsDashboard();
+        }
+    }
+});
+
 // Sidebar toggle for mobile test attempt view
 toggleSidebarBtn?.addEventListener('click', () => {
     testSidebar?.classList.toggle('collapsed');
@@ -670,6 +809,95 @@ document.querySelectorAll('.clear-text-btn').forEach(btn => {
 
 generateTestBtn.addEventListener('click', handleGenerateTest);
 
+// Manual Question Parser (No AI needed)
+function parseManualQuestions(text: string): Question[] | null {
+    try {
+        const questions: Question[] = [];
+        
+        // Split by question numbers (1., 2., etc. or Q1, Q2, etc.)
+        const questionBlocks = text.split(/(?=\d+\.\s)|(?=Q\s*\d+[\.:)])/i).filter(block => block.trim());
+        
+        for (const block of questionBlocks) {
+            const lines = block.trim().split('\n').map(l => l.trim()).filter(l => l);
+            if (lines.length < 3) continue; // Need at least question + options + answer
+            
+            let questionText = '';
+            const options: string[] = [];
+            let answerChar = '';
+            let explanation = '';
+            let subject = 'General';
+            let topic = 'Miscellaneous';
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                
+                // Extract question text
+                if (i === 0 || (!questionText && !line.match(/^[a-d]\)/i) && !line.toLowerCase().startsWith('answer'))) {
+                    questionText += (questionText ? ' ' : '') + line.replace(/^\d+\.\s*|^Q\s*\d+[\.:)]\s*/i, '');
+                }
+                
+                // Extract options (a), b), c), d) or A), B), C), D)
+                const optionMatch = line.match(/^([a-d])\)\s*(.+)/i);
+                if (optionMatch) {
+                    options.push(optionMatch[2].trim());
+                    continue;
+                }
+                
+                // Extract answer
+                const answerMatch = line.match(/^Answer:\s*([a-d])/i);
+                if (answerMatch) {
+                    answerChar = answerMatch[1].toLowerCase();
+                    continue;
+                }
+                
+                // Extract explanation
+                const explanationMatch = line.match(/^Explanation:\s*(.+)/i);
+                if (explanationMatch) {
+                    explanation = explanationMatch[1].trim();
+                    // Collect multiline explanation
+                    for (let j = i + 1; j < lines.length; j++) {
+                        if (lines[j].toLowerCase().startsWith('subject') || lines[j].toLowerCase().startsWith('topic')) {
+                            break;
+                        }
+                        explanation += ' ' + lines[j];
+                    }
+                    continue;
+                }
+                
+                // Extract subject and topic
+                const subjectMatch = line.match(/^Subject:\s*(.+?)(?:\s*\||\s*$)/i);
+                if (subjectMatch) {
+                    subject = subjectMatch[1].trim();
+                }
+                
+                const topicMatch = line.match(/Topic:\s*(.+)/i);
+                if (topicMatch) {
+                    topic = topicMatch[1].trim();
+                }
+            }
+            
+            // Validate question
+            if (questionText && options.length === 4 && answerChar) {
+                const answerIndex = answerChar.charCodeAt(0) - 'a'.charCodeAt(0);
+                
+                questions.push({
+                    question: questionText,
+                    options: options,
+                    answer: answerIndex,
+                    explanation: explanation || 'No explanation provided.',
+                    subject: subject,
+                    topic: topic
+                });
+            }
+        }
+        
+        return questions.length > 0 ? questions : null;
+    } catch (error) {
+        console.error('Manual parsing error:', error);
+        return null;
+    }
+}
+
 async function handleGenerateTest() {
     if (!ai) {
         alert("AI Service is not available.");
@@ -708,6 +936,31 @@ async function handleGenerateTest() {
                 const manualText = manualInput.value.trim();
                 if (!manualText) throw new Error('Please paste your questions in the text area.');
                 source = "Bulk Import";
+                
+                // Try parsing manually first (without AI)
+                const parsedQuestions = parseManualQuestions(manualText);
+                
+                if (parsedQuestions && parsedQuestions.length > 0) {
+                    // Successfully parsed without AI
+                    currentTest = {
+                        id: `test_${Date.now()}`,
+                        name: testName || `Test on ${source}`,
+                        questions: parsedQuestions,
+                        duration: parseInt(durationInput.value, 10),
+                        language: language,
+                        createdAt: new Date().toISOString(),
+                        marksPerQuestion: marks,
+                        negativeMarking: negative
+                    };
+                    
+                    renderEditableTest(currentTest);
+                    showView(editTestView);
+                    loader.classList.add('hidden');
+                    generateTestBtn.disabled = false;
+                    return; // Exit early, no AI needed
+                }
+                
+                // Fallback to AI if manual parsing fails
                 const promptManual = `Analyze the following text and extract ALL multiple-choice questions found within it.
                 
                 The text is expected to contain questions in a format similar to:
@@ -1023,28 +1276,127 @@ saveTestBtn.addEventListener('click', () => {
 
 
 // --- All Tests & Test Detail Logic ---
+let filteredTests: Test[] = [];
+let currentSearchQuery = '';
+let currentSortOption = 'newest';
+
 function renderAllTests() {
     const tests = getFromStorage<Test[]>('tests', []);
+    
+    // Render stats overview
+    const testsStatsOverview = document.getElementById('tests-stats-overview');
+    if (tests.length > 0) {
+        const totalQuestions = tests.reduce((sum, t) => sum + t.questions.length, 0);
+        const avgQuestions = Math.round(totalQuestions / tests.length);
+        const totalDuration = tests.reduce((sum, t) => sum + t.duration, 0);
+        
+        testsStatsOverview.innerHTML = `
+            <div class="stat-card-mini">
+                <span class="material-symbols-outlined">library_books</span>
+                <div>
+                    <div class="stat-value-mini">${tests.length}</div>
+                    <div class="stat-label-mini">Total Tests</div>
+                </div>
+            </div>
+            <div class="stat-card-mini">
+                <span class="material-symbols-outlined">quiz</span>
+                <div>
+                    <div class="stat-value-mini">${totalQuestions}</div>
+                    <div class="stat-label-mini">Total Questions</div>
+                </div>
+            </div>
+            <div class="stat-card-mini">
+                <span class="material-symbols-outlined">functions</span>
+                <div>
+                    <div class="stat-value-mini">${avgQuestions}</div>
+                    <div class="stat-label-mini">Avg Questions/Test</div>
+                </div>
+            </div>
+            <div class="stat-card-mini">
+                <span class="material-symbols-outlined">schedule</span>
+                <div>
+                    <div class="stat-value-mini">${Math.round(totalDuration / 60)}h ${totalDuration % 60}m</div>
+                    <div class="stat-label-mini">Total Duration</div>
+                </div>
+            </div>
+        `;
+    } else {
+        testsStatsOverview.innerHTML = '';
+    }
+    
     if (tests.length === 0) {
         allTestsContainer.innerHTML = `<p class="placeholder">You haven't saved any tests yet.</p>`;
         return;
     }
-    allTestsContainer.innerHTML = tests.map(test => {
+    
+    // Apply search and filters
+    filteredTests = tests.filter(test => {
+        if (currentSearchQuery) {
+            return test.name.toLowerCase().includes(currentSearchQuery.toLowerCase());
+        }
+        return true;
+    });
+    
+    // Sort tests
+    switch (currentSortOption) {
+        case 'newest':
+            filteredTests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            break;
+        case 'oldest':
+            filteredTests.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+            break;
+        case 'name-asc':
+            filteredTests.sort((a, b) => a.name.localeCompare(b.name));
+            break;
+        case 'name-desc':
+            filteredTests.sort((a, b) => b.name.localeCompare(a.name));
+            break;
+        case 'questions-desc':
+            filteredTests.sort((a, b) => b.questions.length - a.questions.length);
+            break;
+        case 'questions-asc':
+            filteredTests.sort((a, b) => a.questions.length - b.questions.length);
+            break;
+    }
+    
+    if (filteredTests.length === 0) {
+        allTestsContainer.innerHTML = `<p class="placeholder">No tests found matching your search.</p>`;
+        return;
+    }
+    
+    allTestsContainer.innerHTML = filteredTests.map(test => {
         const dateObj = new Date(test.createdAt);
         const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        const time = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        
+        // Get subjects from questions
+        const subjects = [...new Set(test.questions.map(q => q.subject))];
+        const subjectsText = subjects.length > 3 ? `${subjects.slice(0, 3).join(', ')}...` : subjects.join(', ');
         
         return `
-        <div class="saved-test-item" data-testid="${test.id}">
-            <div>
-                <h3>${test.name}</h3>
-                <p>Created on ${date}</p>
+        <div class="saved-test-item enhanced" data-testid="${test.id}">
+            <div class="test-item-header">
+                <div>
+                    <h3>${test.name}</h3>
+                    <p class="test-meta">
+                        <span><span class="material-symbols-outlined">calendar_today</span> ${date}</span>
+                        <span><span class="material-symbols-outlined">schedule</span> ${time}</span>
+                    </p>
+                    ${subjects.length > 0 ? `<p class="test-subjects"><span class="material-symbols-outlined">category</span> ${subjectsText}</p>` : ''}
+                </div>
             </div>
-            <div class="test-stats-preview">
+            <div class="test-stats-preview enhanced">
                  <div class="stat-pill">
-                    <span class="material-symbols-outlined">quiz</span> ${test.questions.length} Questions
+                    <span class="material-symbols-outlined">quiz</span> ${test.questions.length} Q's
                  </div>
                  <div class="stat-pill">
-                    <span class="material-symbols-outlined">timer</span> ${test.duration} mins
+                    <span class="material-symbols-outlined">timer</span> ${test.duration} min
+                 </div>
+                 <div class="stat-pill">
+                    <span class="material-symbols-outlined">school</span> ${test.language}
+                 </div>
+                 <div class="stat-pill">
+                    <span class="material-symbols-outlined">star</span> ${test.marksPerQuestion} marks
                  </div>
             </div>
             <div class="test-card-actions">
@@ -1063,6 +1415,28 @@ function renderAllTests() {
             </div>
         </div>
     `}).join('');
+}
+
+// Search and filter event listeners
+const testSearchInput = document.getElementById('test-search-input') as HTMLInputElement;
+const testSortSelect = document.getElementById('test-sort-select') as HTMLSelectElement;
+
+if (testSearchInput) {
+    testSearchInput.addEventListener('input', (e) => {
+        currentSearchQuery = (e.target as HTMLInputElement).value;
+        if (!allTestsView.classList.contains('hidden')) {
+            renderAllTests();
+        }
+    });
+}
+
+if (testSortSelect) {
+    testSortSelect.addEventListener('change', (e) => {
+        currentSortOption = (e.target as HTMLSelectElement).value;
+        if (!allTestsView.classList.contains('hidden')) {
+            renderAllTests();
+        }
+    });
 }
 
 function handleDownloadTest(test: Test) {
@@ -1530,51 +1904,157 @@ function renderPerformanceHistory() {
         return;
     }
 
-    performanceContainer.innerHTML = history.map((attempt, index) => {
+    // Calculate overall stats
+    const totalTests = history.length;
+    const avgScore = history.reduce((sum, a) => sum + a.score, 0) / totalTests;
+    const totalCorrect = history.reduce((sum, a) => sum + a.correctAnswers, 0);
+    const totalQuestions = history.reduce((sum, a) => sum + a.totalQuestions, 0);
+    const overallAccuracy = (totalCorrect / totalQuestions) * 100;
+    const bestScore = Math.max(...history.map(a => a.score));
+    const recentImprovement = history.length >= 3 ? 
+        (history.slice(0, 3).reduce((sum, a) => sum + a.score, 0) / 3) - 
+        (history.slice(-3).reduce((sum, a) => sum + a.score, 0) / 3) : 0;
+
+    // Add overview stats at the top
+    const overviewHTML = `
+        <div class="performance-overview-grid">
+            <div class="perf-stat-card">
+                <div class="perf-stat-icon"><span class="material-symbols-outlined">history</span></div>
+                <div class="perf-stat-content">
+                    <div class="perf-stat-value">${totalTests}</div>
+                    <div class="perf-stat-label">Tests Completed</div>
+                </div>
+            </div>
+            <div class="perf-stat-card">
+                <div class="perf-stat-icon" style="background: linear-gradient(135deg, #10b981, #059669);"><span class="material-symbols-outlined">percent</span></div>
+                <div class="perf-stat-content">
+                    <div class="perf-stat-value">${avgScore.toFixed(1)}%</div>
+                    <div class="perf-stat-label">Average Score</div>
+                </div>
+            </div>
+            <div class="perf-stat-card">
+                <div class="perf-stat-icon" style="background: linear-gradient(135deg, #f59e0b, #d97706);"><span class="material-symbols-outlined">emoji_events</span></div>
+                <div class="perf-stat-content">
+                    <div class="perf-stat-value">${bestScore.toFixed(1)}%</div>
+                    <div class="perf-stat-label">Best Score</div>
+                </div>
+            </div>
+            <div class="perf-stat-card">
+                <div class="perf-stat-icon" style="background: linear-gradient(135deg, #06b6d4, #0891b2);"><span class="material-symbols-outlined">track_changes</span></div>
+                <div class="perf-stat-content">
+                    <div class="perf-stat-value">${overallAccuracy.toFixed(1)}%</div>
+                    <div class="perf-stat-label">Overall Accuracy</div>
+                </div>
+            </div>
+            <div class="perf-stat-card">
+                <div class="perf-stat-icon" style="background: linear-gradient(135deg, ${recentImprovement >= 0 ? '#10b981, #059669' : '#ef4444, #dc2626'});"><span class="material-symbols-outlined">${recentImprovement >= 0 ? 'trending_up' : 'trending_down'}</span></div>
+                <div class="perf-stat-content">
+                    <div class="perf-stat-value">${recentImprovement >= 0 ? '+' : ''}${recentImprovement.toFixed(1)}%</div>
+                    <div class="perf-stat-label">Recent Trend</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section-divider">
+            <h3><span class="material-symbols-outlined">list_alt</span> Test History</h3>
+        </div>
+    `;
+
+    const historyCards = history.map((attempt, index) => {
         const dateObj = new Date(attempt.completedAt);
         const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
         const time = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-        const scoreClass = attempt.score >= 50 ? 'pass' : 'fail';
-        const timeTakenStr = new Date(attempt.timeTaken * 1000).toISOString().substr(14, 5); // MM:SS
+        const scoreClass = attempt.score >= 70 ? 'excellent' : attempt.score >= 50 ? 'pass' : 'fail';
+        const timeTakenStr = new Date(attempt.timeTaken * 1000).toISOString().substr(11, 8); // HH:MM:SS
+        const accuracy = attempt.totalQuestions > 0 ? 
+            ((attempt.correctAnswers / (attempt.correctAnswers + attempt.incorrectAnswers)) * 100 || 0) : 0;
 
         return `
-        <div class="history-card" data-attempt-index="${index}">
-            <div class="history-info">
-                <h3>${attempt.testName}</h3>
-                <div class="history-meta">
-                    <span title="Date"><span class="material-symbols-outlined">calendar_today</span> ${date} at ${time}</span>
+        <div class="history-card enhanced" data-attempt-index="${index}">
+            <div class="history-card-header">
+                <div class="history-info">
+                    <h3>${attempt.testName}</h3>
+                    <div class="history-meta">
+                        <span><span class="material-symbols-outlined">calendar_today</span> ${date}</span>
+                        <span><span class="material-symbols-outlined">schedule</span> ${time}</span>
+                    </div>
+                </div>
+                <div class="history-score-badge-container">
+                    <div class="score-badge-large ${scoreClass}">
+                        <div class="score-value">${attempt.score.toFixed(1)}<span class="score-percent">%</span></div>
+                        <div class="score-label">Score</div>
+                    </div>
                 </div>
             </div>
-            <div class="history-stats-preview">
-                 <div class="stat-pill">
-                    <span class="material-symbols-outlined">check_circle</span> ${attempt.correctAnswers} Correct
-                 </div>
-                 <div class="stat-pill">
-                    <span class="material-symbols-outlined">cancel</span> ${attempt.incorrectAnswers} Incorrect
-                 </div>
-                 <div class="stat-pill">
-                    <span class="material-symbols-outlined">timer</span> ${timeTakenStr}
-                 </div>
+            
+            <div class="history-stats-grid">
+                <div class="history-stat-item">
+                    <span class="material-symbols-outlined" style="color: var(--success-color);">check_circle</span>
+                    <div>
+                        <div class="stat-value">${attempt.correctAnswers}</div>
+                        <div class="stat-label">Correct</div>
+                    </div>
+                </div>
+                <div class="history-stat-item">
+                    <span class="material-symbols-outlined" style="color: var(--danger-color);">cancel</span>
+                    <div>
+                        <div class="stat-value">${attempt.incorrectAnswers}</div>
+                        <div class="stat-label">Incorrect</div>
+                    </div>
+                </div>
+                <div class="history-stat-item">
+                    <span class="material-symbols-outlined" style="color: var(--text-muted);">help</span>
+                    <div>
+                        <div class="stat-value">${attempt.unanswered}</div>
+                        <div class="stat-label">Unanswered</div>
+                    </div>
+                </div>
+                <div class="history-stat-item">
+                    <span class="material-symbols-outlined" style="color: var(--info-color);">timer</span>
+                    <div>
+                        <div class="stat-value">${timeTakenStr}</div>
+                        <div class="stat-label">Time</div>
+                    </div>
+                </div>
+                <div class="history-stat-item">
+                    <span class="material-symbols-outlined" style="color: var(--accent-cyan);">track_changes</span>
+                    <div>
+                        <div class="stat-value">${accuracy.toFixed(0)}%</div>
+                        <div class="stat-label">Accuracy</div>
+                    </div>
+                </div>
+                <div class="history-stat-item">
+                    <span class="material-symbols-outlined" style="color: var(--warning-color);">speed</span>
+                    <div>
+                        <div class="stat-value">${(attempt.timeTaken / attempt.totalQuestions).toFixed(0)}s</div>
+                        <div class="stat-label">Avg/Q</div>
+                    </div>
+                </div>
             </div>
-            <div class="history-score-area">
-                <div class="score-badge ${scoreClass}">${attempt.score.toFixed(2)}%</div>
-                <p class="accuracy-label">Accuracy</p>
+            
+            <div class="history-card-footer">
+                <button class="view-report-btn">
+                    <span class="material-symbols-outlined">analytics</span>
+                    <span>View Detailed Analysis</span>
+                </button>
             </div>
-            <button class="view-test-btn" style="width: 100%; margin-top: 1rem;">
-                <span class="material-symbols-outlined">analytics</span> View Detailed Analysis
-            </button>
         </div>
     `}).join('');
+
+    performanceContainer.innerHTML = overviewHTML + historyCards;
 }
 
 performanceContainer.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
-    const item = target.closest('.history-card') as HTMLElement; 
-    if (item) {
-        const index = parseInt(item.dataset.attemptIndex, 10);
-        const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
-        renderPerformanceReport(history[index], true);
-        showView(performanceReportView);
+    const btn = target.closest('.view-report-btn');
+    if (btn) {
+        const item = btn.closest('.history-card') as HTMLElement;
+        if (item) {
+            const index = parseInt(item.dataset.attemptIndex, 10);
+            const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+            renderPerformanceReport(history[index], true);
+            showView(performanceReportView);
+        }
     }
 });
 
@@ -1792,34 +2272,97 @@ function renderTimeAnalysisCharts(attempt: TestAttempt) {
     const minTime = Math.min(...attempt.timePerQuestion);
     const medianTime = [...attempt.timePerQuestion].sort((a, b) => a - b)[Math.floor(attempt.timePerQuestion.length / 2)];
     
-    // Time Statistics Cards
+    // Calculate time efficiency
+    const totalTime = attempt.timeTaken;
+    const totalTimeMin = Math.floor(totalTime / 60);
+    const totalTimeSec = totalTime % 60;
+    const availableTime = attempt.fullTest.duration * 60;
+    const timeUtilization = (totalTime / availableTime) * 100;
+    const timePerCorrect = attempt.correctAnswers > 0 ? totalTime / attempt.correctAnswers : 0;
+    const timePerIncorrect = attempt.incorrectAnswers > 0 ? 
+        attempt.fullTest.questions.reduce((sum, q, i) => {
+            if (attempt.userAnswers[i] !== null && attempt.userAnswers[i] !== q.answer) {
+                return sum + attempt.timePerQuestion[i];
+            }
+            return sum;
+        }, 0) / attempt.incorrectAnswers : 0;
+    
+    // Time Statistics Cards with Enhanced Metrics
     let timeStatsHTML = `
-        <div class="time-stats-grid">
-            <div class="time-stat-card">
-                <span class="material-symbols-outlined">avg_time</span>
-                <div class="time-stat-value">${avgTime.toFixed(1)}s</div>
-                <div class="time-stat-label">Average</div>
+        <div class="time-stats-grid enhanced">
+            <div class="time-stat-card premium">
+                <div class="time-stat-icon" style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">
+                    <span class="material-symbols-outlined">timer</span>
+                </div>
+                <div class="time-stat-content">
+                    <div class="time-stat-value">${totalTimeMin}m ${totalTimeSec}s</div>
+                    <div class="time-stat-label">Total Time</div>
+                    <div class="time-stat-sublabel">${timeUtilization.toFixed(0)}% of ${attempt.fullTest.duration} min</div>
+                </div>
             </div>
-            <div class="time-stat-card">
-                <span class="material-symbols-outlined">arrow_upward</span>
-                <div class="time-stat-value">${maxTime.toFixed(1)}s</div>
-                <div class="time-stat-label">Maximum</div>
+            <div class="time-stat-card premium">
+                <div class="time-stat-icon" style="background: linear-gradient(135deg, #10b981, #059669);">
+                    <span class="material-symbols-outlined">avg_time</span>
+                </div>
+                <div class="time-stat-content">
+                    <div class="time-stat-value">${avgTime.toFixed(1)}s</div>
+                    <div class="time-stat-label">Average per Q</div>
+                    <div class="time-stat-sublabel">Median: ${medianTime.toFixed(1)}s</div>
+                </div>
             </div>
-            <div class="time-stat-card">
-                <span class="material-symbols-outlined">arrow_downward</span>
-                <div class="time-stat-value">${minTime.toFixed(1)}s</div>
-                <div class="time-stat-label">Minimum</div>
+            <div class="time-stat-card premium">
+                <div class="time-stat-icon" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">
+                    <span class="material-symbols-outlined">check_circle</span>
+                </div>
+                <div class="time-stat-content">
+                    <div class="time-stat-value">${timePerCorrect.toFixed(1)}s</div>
+                    <div class="time-stat-label">Avg for Correct</div>
+                    <div class="time-stat-sublabel">${attempt.correctAnswers} questions</div>
+                </div>
             </div>
-            <div class="time-stat-card">
-                <span class="material-symbols-outlined">vertical_align_center</span>
-                <div class="time-stat-value">${medianTime.toFixed(1)}s</div>
-                <div class="time-stat-label">Median</div>
+            <div class="time-stat-card premium">
+                <div class="time-stat-icon" style="background: linear-gradient(135deg, #ef4444, #dc2626);">
+                    <span class="material-symbols-outlined">cancel</span>
+                </div>
+                <div class="time-stat-content">
+                    <div class="time-stat-value">${timePerIncorrect.toFixed(1)}s</div>
+                    <div class="time-stat-label">Avg for Incorrect</div>
+                    <div class="time-stat-sublabel">${attempt.incorrectAnswers} questions</div>
+                </div>
+            </div>
+            <div class="time-stat-card premium">
+                <div class="time-stat-icon" style="background: linear-gradient(135deg, #f59e0b, #d97706);">
+                    <span class="material-symbols-outlined">arrow_upward</span>
+                </div>
+                <div class="time-stat-content">
+                    <div class="time-stat-value">${maxTime.toFixed(1)}s</div>
+                    <div class="time-stat-label">Longest</div>
+                    <div class="time-stat-sublabel">Max time spent</div>
+                </div>
+            </div>
+            <div class="time-stat-card premium">
+                <div class="time-stat-icon" style="background: linear-gradient(135deg, #06b6d4, #0891b2);">
+                    <span class="material-symbols-outlined">arrow_downward</span>
+                </div>
+                <div class="time-stat-content">
+                    <div class="time-stat-value">${minTime.toFixed(1)}s</div>
+                    <div class="time-stat-label">Shortest</div>
+                    <div class="time-stat-sublabel">Min time spent</div>
+                </div>
             </div>
         </div>
     `;
     
     // Question Time Chart with Toggle Button
-    let perQuestionChartHTML = '<h4 style="margin-top: 1.5rem;">Time Spent Per Question</h4><div class="chart-legend"><span class="legend-item"><span class="palette-indicator answered"></span> Correct</span><span class="legend-item"><span class="palette-indicator not-answered"></span> Incorrect</span><span class="legend-item"><span class="palette-indicator not-visited"></span> Unanswered</span></div>';
+    let perQuestionChartHTML = `
+        <div class="chart-section">
+            <h4><span class="material-symbols-outlined">bar_chart</span> Time Spent Per Question</h4>
+            <div class="chart-legend">
+                <span class="legend-item"><span class="legend-dot" style="background: var(--success-color);"></span> Correct</span>
+                <span class="legend-item"><span class="legend-dot" style="background: var(--danger-color);"></span> Incorrect</span>
+                <span class="legend-item"><span class="legend-dot" style="background: var(--text-muted);"></span> Unanswered</span>
+            </div>
+    `;
     
     perQuestionChartHTML += '<div id="q-chart-container" class="chart question-time-chart">';
 
@@ -1848,7 +2391,7 @@ function renderTimeAnalysisCharts(attempt: TestAttempt) {
     perQuestionChartHTML += '</div>';
     
     // Add the Expand Button
-    perQuestionChartHTML += `<button id="expand-chart-btn" class="expand-chart-btn">Show Full Chart (All Questions)</button>`;
+    perQuestionChartHTML += `<button id="expand-chart-btn" class="expand-chart-btn"><span class="material-symbols-outlined">unfold_more</span> Show Full Chart (All Questions)</button></div>`;
 
     // Subject Time Analysis
     const subjectTimes: { [key: string]: { totalTime: number; count: number; correct: number } } = {};
@@ -1867,31 +2410,45 @@ function renderTimeAnalysisCharts(attempt: TestAttempt) {
     const subjectAvgs = Object.entries(subjectTimes).map(([subject, data]) => ({
         subject,
         avgTime: data.totalTime / data.count,
-        accuracy: (data.correct / data.count) * 100
+        accuracy: (data.correct / data.count) * 100,
+        count: data.count,
+        totalTime: data.totalTime
     }));
     
     const maxAvgTime = Math.max(...subjectAvgs.map(s => s.avgTime), 1);
     
-    let perSubjectChartHTML = '<br><br><h4>Average Time Per Subject</h4><div class="chart subject-time-chart">';
-    subjectAvgs.forEach(({ subject, avgTime, accuracy }) => {
+    let perSubjectChartHTML = `
+        <div class="chart-section">
+            <h4><span class="material-symbols-outlined">category</span> Average Time Per Subject</h4>
+            <div class="chart subject-time-chart enhanced">
+    `;
+    subjectAvgs.forEach(({ subject, avgTime, accuracy, count, totalTime }) => {
         const barWidth = (avgTime / maxAvgTime) * 100;
         const barColor = accuracy >= 70 ? 'var(--success-color)' : accuracy >= 50 ? 'var(--warning-color)' : 'var(--danger-color)';
+        const totalMin = Math.floor(totalTime / 60);
+        const totalSec = Math.round(totalTime % 60);
         perSubjectChartHTML += `
-            <div class="chart-row">
-                <div class="chart-label">${subject}</div>
+            <div class="chart-row enhanced">
+                <div class="chart-label">
+                    <div class="chart-label-main">${subject}</div>
+                    <div class="chart-label-sub">${count} questions • ${totalMin}m ${totalSec}s total</div>
+                </div>
                 <div class="chart-bar-container">
-                    <div class="chart-bar" style="width: ${barWidth}%; background: ${barColor}" title="Avg Time: ${avgTime.toFixed(1)}s | Accuracy: ${accuracy.toFixed(0)}%"></div>
+                    <div class="chart-bar" style="width: ${barWidth}%; background: ${barColor}" title="Avg Time: ${avgTime.toFixed(1)}s | Accuracy: ${accuracy.toFixed(0)}%">
+                        <span class="chart-bar-label">${accuracy.toFixed(0)}%</span>
+                    </div>
                 </div>
                 <div class="chart-value">${avgTime.toFixed(1)}s</div>
             </div>
         `;
     });
-    perSubjectChartHTML += '</div>';
+    perSubjectChartHTML += '</div></div>';
     
     // Time Distribution Analysis
     let timeDistHTML = `
-        <h4 style="margin-top: 2rem;">Time Distribution Insights</h4>
-        <div class="time-distribution-grid">
+        <div class="chart-section">
+            <h4><span class="material-symbols-outlined">donut_large</span> Time Distribution Analysis</h4>
+            <div class="time-distribution-grid">
     `;
     
     // Categorize by time ranges
@@ -1905,15 +2462,31 @@ function renderTimeAnalysisCharts(attempt: TestAttempt) {
     
     timeDistHTML += `
             <div class="time-dist-bar">
-                <div class="dist-segment quick" style="width: ${quickPct}%"></div>
-                <div class="dist-segment normal" style="width: ${normalPct}%"></div>
-                <div class="dist-segment slow" style="width: ${slowPct}%"></div>
+                <div class="dist-segment quick" style="width: ${quickPct}%" title="${quick} questions (${quickPct.toFixed(1)}%)"></div>
+                <div class="dist-segment normal" style="width: ${normalPct}%" title="${normal} questions (${normalPct.toFixed(1)}%)"></div>
+                <div class="dist-segment slow" style="width: ${slowPct}%" title="${slow} questions (${slowPct.toFixed(1)}%)"></div>
             </div>
             <div class="time-dist-legend">
-                <div class="dist-legend-item"><span class="dist-dot quick"></span> Quick (< ${(avgTime * 0.5).toFixed(0)}s): ${quick}</div>
-                <div class="dist-legend-item"><span class="dist-dot normal"></span> Normal: ${normal}</div>
-                <div class="dist-legend-item"><span class="dist-dot slow"></span> Slow (> ${(avgTime * 1.5).toFixed(0)}s): ${slow}</div>
+                <div class="dist-legend-item">
+                    <span class="dist-dot quick"></span>
+                    <div class="dist-legend-text">
+                        <strong>Quick</strong> (< ${(avgTime * 0.5).toFixed(0)}s): <strong>${quick}</strong> questions (${quickPct.toFixed(1)}%)
+                    </div>
+                </div>
+                <div class="dist-legend-item">
+                    <span class="dist-dot normal"></span>
+                    <div class="dist-legend-text">
+                        <strong>Normal</strong> (${(avgTime * 0.5).toFixed(0)}-${(avgTime * 1.5).toFixed(0)}s): <strong>${normal}</strong> questions (${normalPct.toFixed(1)}%)
+                    </div>
+                </div>
+                <div class="dist-legend-item">
+                    <span class="dist-dot slow"></span>
+                    <div class="dist-legend-text">
+                        <strong>Slow</strong> (> ${(avgTime * 1.5).toFixed(0)}s): <strong>${slow}</strong> questions (${slowPct.toFixed(1)}%)
+                    </div>
+                </div>
             </div>
+        </div>
         </div>
     `;
 
@@ -2061,44 +2634,74 @@ function renderTopicWiseAnalysis(attempt: TestAttempt) {
     const weakTopics = sortedTopics.filter(t => t.accuracy < 50).slice(-3).reverse();
     
     topicWiseContainer.innerHTML = `
-        <div class="topic-insights-grid">
+        <div class="topic-insights-grid enhanced">
             <div class="insight-card strength">
-                <h4><span class="material-symbols-outlined">trending_up</span> Strong Topics</h4>
-                ${strongTopics.length > 0 ? strongTopics.map(t => `
+                <div class="insight-card-header">
+                    <span class="material-symbols-outlined">trending_up</span>
+                    <h4>Strong Topics</h4>
+                </div>
+                ${strongTopics.length > 0 ? strongTopics.map((t, idx) => `
                     <div class="insight-item">
-                        <span class="topic-name">${t.topic}</span>
-                        <span class="topic-score" style="color: var(--success-color)">${t.accuracy.toFixed(0)}%</span>
+                        <div class="insight-rank">#${idx + 1}</div>
+                        <div class="insight-content">
+                            <div class="topic-name">${t.topic}</div>
+                            <div class="topic-meta">
+                                <span>${t.subject}</span> • 
+                                <span>${t.correct}/${t.total} correct</span> • 
+                                <span>${t.avgTime.toFixed(1)}s avg</span>
+                            </div>
+                        </div>
+                        <div class="topic-score success">${t.accuracy.toFixed(0)}%</div>
                     </div>
-                `).join('') : '<p class="no-data">No strong topics identified yet</p>'}
+                `).join('') : '<p class="no-data">Complete more questions to identify strong topics</p>'}
             </div>
             <div class="insight-card weakness">
-                <h4><span class="material-symbols-outlined">trending_down</span> Need Improvement</h4>
-                ${weakTopics.length > 0 ? weakTopics.map(t => `
+                <div class="insight-card-header">
+                    <span class="material-symbols-outlined">trending_down</span>
+                    <h4>Need Improvement</h4>
+                </div>
+                ${weakTopics.length > 0 ? weakTopics.map((t, idx) => `
                     <div class="insight-item">
-                        <span class="topic-name">${t.topic}</span>
-                        <span class="topic-score" style="color: var(--danger-color)">${t.accuracy.toFixed(0)}%</span>
+                        <div class="insight-rank warn">#${weakTopics.length - idx}</div>
+                        <div class="insight-content">
+                            <div class="topic-name">${t.topic}</div>
+                            <div class="topic-meta">
+                                <span>${t.subject}</span> • 
+                                <span>${t.correct}/${t.total} correct</span> • 
+                                <span>${t.avgTime.toFixed(1)}s avg</span>
+                            </div>
+                        </div>
+                        <div class="topic-score danger">${t.accuracy.toFixed(0)}%</div>
                     </div>
                 `).join('') : '<p class="no-data">Great! No weak topics found</p>'}
             </div>
         </div>
         
-        <h4 style="margin-top: 1.5rem;">All Topics Performance</h4>
-        <div class="topic-chart-container">
-            ${sortedTopics.map(t => {
-                const barColor = t.accuracy >= 70 ? 'var(--success-color)' : t.accuracy >= 50 ? 'var(--warning-color)' : 'var(--danger-color)';
-                return `
-                    <div class="topic-chart-row">
-                        <div class="topic-chart-label">
-                            <span class="topic-name">${t.topic}</span>
-                            <span class="topic-subject">${t.subject}</span>
+        <div class="chart-section">
+            <h4><span class="material-symbols-outlined">topic</span> All Topics Performance</h4>
+            <div class="topic-chart-container enhanced">
+                ${sortedTopics.map(t => {
+                    const barColor = t.accuracy >= 70 ? 'var(--success-color)' : t.accuracy >= 50 ? 'var(--warning-color)' : 'var(--danger-color)';
+                    const timeClass = t.avgTime > avgTime * 1.2 ? 'slow' : t.avgTime < avgTime * 0.8 ? 'fast' : 'normal';
+                    return `
+                        <div class="topic-chart-row enhanced">
+                            <div class="topic-chart-label">
+                                <div class="topic-name">${t.topic}</div>
+                                <div class="topic-subject">${t.subject} • ${t.total} Q's • ${t.avgTime.toFixed(1)}s avg</div>
+                            </div>
+                            <div class="topic-chart-bar-container">
+                                <div class="topic-chart-bar" style="width: ${t.accuracy}%; background: ${barColor}">
+                                    <span class="topic-chart-bar-label">${t.accuracy.toFixed(0)}%</span>
+                                </div>
+                            </div>
+                            <div class="topic-chart-stats">
+                                <div class="topic-stat-value">${t.correct}/${t.total}</div>
+                                <div class="topic-stat-label">Correct</div>
+                            </div>
                         </div>
-                        <div class="topic-chart-bar-container">
-                            <div class="topic-chart-bar" style="width: ${t.accuracy}%; background: ${barColor}"></div>
-                            <span class="topic-chart-value">${t.correct}/${t.total} (${t.accuracy.toFixed(0)}%)</span>
-                        </div>
-                    </div>
-                `;
-            }).join('')}
+                    `;
+                }).join('')}
+            </div>
         </div>
     `;
 }
@@ -2715,24 +3318,59 @@ function renderAnalyticsDashboard() {
 
 // Score Trend Graph
 function renderScoreTrendGraph(sortedHistory: TestAttempt[]) {
+    // Remove any existing score trend card to prevent duplication
+    const existingTrend = document.querySelector('.score-trend-card');
+    if (existingTrend) {
+        existingTrend.remove();
+    }
+    
     const trendContainer = document.createElement('div');
     trendContainer.className = 'report-card score-trend-card';
+    trendContainer.id = 'score-trend-graph'; // Add ID for easy identification
+    
+    // Enhanced score trend with more features
+    const recentTests = sortedHistory.slice(0, 10).reverse();
+    const avgScore = recentTests.reduce((sum, a) => sum + a.score, 0) / recentTests.length;
+    const maxScore = Math.max(...recentTests.map(a => a.score));
+    const minScore = Math.min(...recentTests.map(a => a.score));
+    const improvement = recentTests.length >= 2 ? recentTests[recentTests.length - 1].score - recentTests[0].score : 0;
+    
     trendContainer.innerHTML = `
-        <h3><span class="material-symbols-outlined">show_chart</span> Score Trend</h3>
-        <div class="score-trend-graph">
-            ${sortedHistory.slice(0, 10).reverse().map((attempt, i) => {
+        <div class="score-trend-header">
+            <h3><span class="material-symbols-outlined">show_chart</span> Score Trend Analysis</h3>
+            <div class="trend-stats-mini">
+                <div class="trend-stat"><span>Avg:</span> <strong>${avgScore.toFixed(1)}%</strong></div>
+                <div class="trend-stat"><span>Peak:</span> <strong style="color: var(--success-color);">${maxScore.toFixed(1)}%</strong></div>
+                <div class="trend-stat"><span>Low:</span> <strong style="color: var(--danger-color);">${minScore.toFixed(1)}%</strong></div>
+                <div class="trend-stat">
+                    <span>Trend:</span> 
+                    <strong style="color: ${improvement >= 0 ? 'var(--success-color)' : 'var(--danger-color)'};">
+                        ${improvement >= 0 ? '+' : ''}${improvement.toFixed(1)}%
+                    </strong>
+                </div>
+            </div>
+        </div>
+        <div class="score-trend-graph enhanced">
+            ${recentTests.map((attempt, i) => {
                 const height = Math.max(attempt.score, 5);
-                const barColor = attempt.score >= 60 ? 'var(--success-color)' : attempt.score >= 40 ? 'var(--warning-color)' : 'var(--danger-color)';
+                const barColor = attempt.score >= 70 ? 'var(--success-color)' : attempt.score >= 50 ? 'var(--info-color)' : attempt.score >= 40 ? 'var(--warning-color)' : 'var(--danger-color)';
                 const date = new Date(attempt.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
                 return `
                     <div class="trend-bar-container" title="${attempt.testName}: ${attempt.score.toFixed(1)}%">
-                        <div class="trend-bar" style="height: ${height}%; background: ${barColor}"></div>
+                        <div class="trend-bar" style="height: ${height}%; background: ${barColor}">
+                            <span class="trend-bar-value">${attempt.score.toFixed(0)}%</span>
+                        </div>
                         <span class="trend-label">${date}</span>
                     </div>
                 `;
             }).join('')}
         </div>
-        <p class="trend-caption">Last ${Math.min(sortedHistory.length, 10)} tests performance</p>
+        <div class="trend-insights">
+            <p><strong>Last ${Math.min(sortedHistory.length, 10)} tests performance</strong></p>
+            ${improvement > 5 ? '<p class="insight-positive">📈 Great improvement! Your scores are trending upward.</p>' : 
+              improvement < -5 ? '<p class="insight-negative">📉 Scores declining. Review weak areas and practice more.</p>' : 
+              '<p class="insight-neutral">➡️ Scores are stable. Focus on consistency and weak topics.</p>'}
+        </div>
     `;
     
     // Insert after stats grid
