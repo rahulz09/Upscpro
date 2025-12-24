@@ -120,10 +120,19 @@
           <span class="material-symbols-outlined">account_circle</span>
           <span id="user-display-name">User</span>
         </div>
-        <button id="logout-btn" class="logout-btn" title="Logout">
-          <span class="material-symbols-outlined">logout</span>
-          <span>Logout</span>
-        </button>
+        <div class="header-actions">
+          <button id="sync-btn" class="sync-btn" title="Cloud Sync">
+            <span class="material-symbols-outlined">cloud_sync</span>
+            <span class="sync-status" id="sync-status">Local</span>
+          </button>
+          <button id="settings-btn" class="settings-btn" title="Settings">
+            <span class="material-symbols-outlined">settings</span>
+          </button>
+          <button id="logout-btn" class="logout-btn" title="Logout">
+            <span class="material-symbols-outlined">logout</span>
+            <span>Logout</span>
+          </button>
+        </div>
       </div>
       <div class="header-title-container">
         <h1><span class="gradient-text">UPSC Test Generator</span></h1>
@@ -193,19 +202,44 @@
                 </div>
             </div>
             <div id="manual-content" class="tab-pane" role="tabpanel">
-                <label for="manual-input">Paste Questions (Structure Format)</label>
-                <div class="format-hint">
-                    <p><strong>Example Format:</strong></p>
-                    <pre>
-1. Which is the largest planet?
+                <label for="manual-input">Paste Questions (No AI Required - Direct Import)</label>
+                <div class="format-hint bulk-import-hint">
+                    <p><strong>✨ Works Without AI!</strong> Paste questions in any of these formats:</p>
+                    <div class="format-examples">
+                        <pre>
+<span class="format-label">Format 1 (Recommended):</span>
+1. Which is the largest planet in our solar system?
 a) Earth  b) Mars  c) Jupiter  d) Venus
 Answer: c
-Explanation: Jupiter is the largest planet in our solar system.
+Explanation: Jupiter is the largest planet with a mass of 1.898×10²⁷ kg.
 Subject: Science | Topic: Solar System
-                    </pre>
+
+2. Who wrote the Indian National Anthem?
+a) Bankim Chandra  b) Rabindranath Tagore  c) Sarojini Naidu  d) Subhash Bose
+Answer: b
+Explanation: Jan Gan Man was written by Tagore in 1911.
+Subject: General Knowledge | Topic: National Symbols</pre>
+                        <pre>
+<span class="format-label">Format 2 (Simple):</span>
+Q1. What is the capital of India?
+A) Mumbai  B) Delhi  C) Chennai  D) Kolkata
+Ans: B
+
+Q2. Which river is longest?
+A) Ganga  B) Yamuna  C) Narmada  D) Godavari
+Ans: A</pre>
+                    </div>
+                    <p class="format-tips"><span class="material-symbols-outlined">tips_and_updates</span> <strong>Tips:</strong> Subject/Topic/Explanation are optional. Options can use a-d, A-D, or 1-4 format.</p>
                 </div>
                 <div class="text-input-wrapper">
-                    <textarea id="manual-input" rows="12" placeholder="Paste your questions here following the format above..."></textarea>
+                    <textarea id="manual-input" rows="14" placeholder="Paste your questions here following any of the formats above...
+
+Example:
+1. What is 2+2?
+a) 3  b) 4  c) 5  d) 6
+Answer: b
+Explanation: Basic arithmetic addition.
+Subject: Math | Topic: Basic Operations"></textarea>
                     <button type="button" class="clear-text-btn" data-target="manual-input" title="Clear text">
                         <span class="material-symbols-outlined">delete</span>
                     </button>
@@ -407,6 +441,148 @@ Subject: Science | Topic: Solar System
           </div>
       </div>
   </section>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal-content settings-modal-content">
+      <div class="modal-header">
+        <h3><span class="material-symbols-outlined">settings</span> Settings</h3>
+        <button id="close-settings-btn" class="close-btn"><span class="material-symbols-outlined">close</span></button>
+      </div>
+      <div id="settings-body">
+        <!-- Cloud Sync Section -->
+        <div class="settings-section">
+          <h4><span class="material-symbols-outlined">cloud</span> Cloud Sync (Replit Backend)</h4>
+          <p class="settings-description">Connect to a Replit backend to sync your tests and results across devices.</p>
+          
+          <div class="backend-status" id="backend-status">
+            <span class="status-dot disconnected"></span>
+            <span class="status-text">Not Connected</span>
+          </div>
+          
+          <div class="form-group">
+            <label for="backend-url">
+              <span class="material-symbols-outlined">link</span>
+              Backend URL
+            </label>
+            <input type="url" id="backend-url" placeholder="https://your-replit-app.replit.app" autocomplete="url">
+            <p class="input-hint">Enter your Replit backend URL (e.g., https://upsc-backend.yourname.repl.co)</p>
+          </div>
+          
+          <div class="form-group">
+            <label for="api-key">
+              <span class="material-symbols-outlined">key</span>
+              API Key (Optional)
+            </label>
+            <input type="password" id="api-key" placeholder="Enter API key if required" autocomplete="off">
+          </div>
+          
+          <div class="backend-actions">
+            <button id="test-connection-btn" class="action-btn">
+              <span class="material-symbols-outlined">wifi_tethering</span> Test Connection
+            </button>
+            <button id="connect-backend-btn" class="action-btn save-btn">
+              <span class="material-symbols-outlined">cloud_done</span> Connect & Sync
+            </button>
+          </div>
+          
+          <div id="connection-result" class="connection-result hidden"></div>
+        </div>
+        
+        <!-- Sync Options -->
+        <div class="settings-section">
+          <h4><span class="material-symbols-outlined">sync</span> Sync Options</h4>
+          <div class="sync-options">
+            <label class="toggle-option">
+              <input type="checkbox" id="auto-sync" checked>
+              <span class="toggle-slider"></span>
+              <span class="toggle-label">Auto-sync after each test</span>
+            </label>
+            <label class="toggle-option">
+              <input type="checkbox" id="sync-results" checked>
+              <span class="toggle-slider"></span>
+              <span class="toggle-label">Sync test results</span>
+            </label>
+            <label class="toggle-option">
+              <input type="checkbox" id="sync-tests" checked>
+              <span class="toggle-slider"></span>
+              <span class="toggle-label">Sync saved tests</span>
+            </label>
+          </div>
+        </div>
+        
+        <!-- Manual Sync -->
+        <div class="settings-section">
+          <h4><span class="material-symbols-outlined">backup</span> Data Management</h4>
+          <div class="data-actions">
+            <button id="manual-sync-btn" class="action-btn">
+              <span class="material-symbols-outlined">sync</span> Manual Sync Now
+            </button>
+            <button id="export-data-btn" class="action-btn">
+              <span class="material-symbols-outlined">download</span> Export All Data
+            </button>
+            <button id="import-data-btn" class="action-btn">
+              <span class="material-symbols-outlined">upload</span> Import Data
+            </button>
+          </div>
+        </div>
+        
+        <!-- Backend Setup Guide -->
+        <div class="settings-section collapsible">
+          <button class="section-toggle">
+            <h4><span class="material-symbols-outlined">help</span> How to Setup Replit Backend</h4>
+            <span class="material-symbols-outlined toggle-icon">expand_more</span>
+          </button>
+          <div class="collapsible-content hidden">
+            <ol class="setup-steps">
+              <li><strong>Create a Replit Account:</strong> Go to <a href="https://replit.com" target="_blank">replit.com</a> and sign up.</li>
+              <li><strong>Create New Repl:</strong> Choose Node.js or Python as template.</li>
+              <li><strong>Copy Backend Code:</strong> Use the code below as your backend:
+                <pre class="code-block">
+// Express.js Backend Example
+const express = require('express');
+const cors = require('cors');
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+let testsDB = [];
+let historyDB = [];
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date() });
+});
+
+app.get('/api/tests', (req, res) => {
+  res.json(testsDB);
+});
+
+app.post('/api/tests', (req, res) => {
+  testsDB = req.body;
+  res.json({ success: true });
+});
+
+app.get('/api/history', (req, res) => {
+  res.json(historyDB);
+});
+
+app.post('/api/history', (req, res) => {
+  historyDB = req.body;
+  res.json({ success: true });
+});
+
+app.listen(3000, () => console.log('Backend running!'));
+                </pre>
+              </li>
+              <li><strong>Run & Deploy:</strong> Click Run and copy the URL from the webview.</li>
+              <li><strong>Paste URL Above:</strong> Enter the URL in the Backend URL field.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Analytics Detailed Modal -->
   <div id="analytics-modal" class="modal-overlay hidden">

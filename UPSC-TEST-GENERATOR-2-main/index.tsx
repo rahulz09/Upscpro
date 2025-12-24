@@ -214,7 +214,7 @@ loginForm.addEventListener('submit', (e) => {
     if (result.success && result.user) {
         loginUser(result.user, remember);
     } else {
-        alert(result.message);
+        showToast(result.message, 'error');
     }
 });
 
@@ -227,14 +227,14 @@ registerForm.addEventListener('submit', (e) => {
     const confirm = registerConfirmInput.value;
     
     if (password !== confirm) {
-        alert('Passwords do not match!');
+        showToast('Passwords do not match!', 'error');
         return;
     }
     
     const result = registerUser(name, username, password);
     
     if (result.success) {
-        alert(result.message);
+        showToast(result.message, 'success');
         // Auto-login after registration
         const authResult = authenticateUser(username, password);
         if (authResult.success && authResult.user) {
@@ -243,7 +243,7 @@ registerForm.addEventListener('submit', (e) => {
             showLoginForm();
         }
     } else {
-        alert(result.message);
+        showToast(result.message, 'error');
     }
 });
 
@@ -371,7 +371,7 @@ try {
     ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 } catch (e) {
     console.error("Failed to initialize GoogleGenAI", e);
-    alert("Error: Could not initialize AI. Please ensure API_KEY is set correctly.");
+    // AI initialization failed - Bulk Import still works without AI
 }
 
 const questionSchema = {
@@ -406,7 +406,220 @@ function saveToStorage<T>(key: string, value: T): void {
     try {
         localStorage.setItem(key, JSON.stringify(value));
     } catch (error) {
-        console.error(`Error writing to localStorage key “${key}”:`, error);
+        console.error(`Error writing to localStorage key "${key}":`, error);
+    }
+}
+
+// --- Backend Sync Configuration & Functions ---
+interface BackendConfig {
+    url: string;
+    apiKey: string;
+    autoSync: boolean;
+    syncResults: boolean;
+    syncTests: boolean;
+    connected: boolean;
+    lastSync: string | null;
+}
+
+const defaultBackendConfig: BackendConfig = {
+    url: '',
+    apiKey: '',
+    autoSync: true,
+    syncResults: true,
+    syncTests: true,
+    connected: false,
+    lastSync: null
+};
+
+function getBackendConfig(): BackendConfig {
+    try {
+        const config = localStorage.getItem('backendConfig');
+        return config ? { ...defaultBackendConfig, ...JSON.parse(config) } : defaultBackendConfig;
+    } catch {
+        return defaultBackendConfig;
+    }
+}
+
+function saveBackendConfig(config: BackendConfig): void {
+    localStorage.setItem('backendConfig', JSON.stringify(config));
+    updateSyncStatusUI(config);
+}
+
+function updateSyncStatusUI(config: BackendConfig): void {
+    const syncStatus = document.getElementById('sync-status');
+    const backendStatus = document.getElementById('backend-status');
+    
+    if (syncStatus) {
+        if (config.connected && config.url) {
+            syncStatus.textContent = 'Synced';
+            syncStatus.classList.add('connected');
+        } else {
+            syncStatus.textContent = 'Local';
+            syncStatus.classList.remove('connected');
+        }
+    }
+    
+    if (backendStatus) {
+        const dot = backendStatus.querySelector('.status-dot');
+        const text = backendStatus.querySelector('.status-text');
+        if (config.connected && config.url) {
+            dot?.classList.remove('disconnected', 'error', 'connecting');
+            dot?.classList.add('connected');
+            if (text) text.textContent = `Connected to ${new URL(config.url).hostname}`;
+        } else {
+            dot?.classList.remove('connected', 'error', 'connecting');
+            dot?.classList.add('disconnected');
+            if (text) text.textContent = 'Not Connected';
+        }
+    }
+}
+
+async function testBackendConnection(url: string, apiKey: string): Promise<{ success: boolean; message: string }> {
+    try {
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json'
+        };
+        if (apiKey) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+        
+        const response = await fetch(`${url}/api/health`, {
+            method: 'GET',
+            headers,
+            mode: 'cors'
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            return { success: true, message: `Connected! Server status: ${data.status || 'OK'}` };
+        } else {
+            return { success: false, message: `Server responded with status: ${response.status}` };
+        }
+    } catch (error) {
+        return { success: false, message: `Connection failed: ${(error as Error).message}` };
+    }
+}
+
+async function syncToBackend(): Promise<{ success: boolean; message: string }> {
+    const config = getBackendConfig();
+    if (!config.url || !config.connected) {
+        return { success: false, message: 'Backend not configured' };
+    }
+    
+    const syncBtn = document.getElementById('sync-btn');
+    syncBtn?.classList.add('syncing');
+    
+    try {
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json'
+        };
+        if (config.apiKey) {
+            headers['Authorization'] = `Bearer ${config.apiKey}`;
+        }
+        
+        const results: string[] = [];
+        
+        // Sync tests
+        if (config.syncTests) {
+            const tests = getFromStorage<Test[]>('tests', []);
+            const testsResponse = await fetch(`${config.url}/api/tests`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(tests),
+                mode: 'cors'
+            });
+            if (testsResponse.ok) {
+                results.push('Tests synced');
+            } else {
+                results.push('Failed to sync tests');
+            }
+        }
+        
+        // Sync history/results
+        if (config.syncResults) {
+            const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+            const historyResponse = await fetch(`${config.url}/api/history`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(history),
+                mode: 'cors'
+            });
+            if (historyResponse.ok) {
+                results.push('Results synced');
+            } else {
+                results.push('Failed to sync results');
+            }
+        }
+        
+        config.lastSync = new Date().toISOString();
+        saveBackendConfig(config);
+        
+        return { success: true, message: results.join(', ') };
+    } catch (error) {
+        return { success: false, message: `Sync failed: ${(error as Error).message}` };
+    } finally {
+        syncBtn?.classList.remove('syncing');
+    }
+}
+
+async function syncFromBackend(): Promise<{ success: boolean; message: string }> {
+    const config = getBackendConfig();
+    if (!config.url || !config.connected) {
+        return { success: false, message: 'Backend not configured' };
+    }
+    
+    try {
+        const headers: Record<string, string> = {};
+        if (config.apiKey) {
+            headers['Authorization'] = `Bearer ${config.apiKey}`;
+        }
+        
+        // Fetch tests from backend
+        if (config.syncTests) {
+            const testsResponse = await fetch(`${config.url}/api/tests`, {
+                method: 'GET',
+                headers,
+                mode: 'cors'
+            });
+            if (testsResponse.ok) {
+                const remoteTests = await testsResponse.json();
+                if (Array.isArray(remoteTests) && remoteTests.length > 0) {
+                    const localTests = getFromStorage<Test[]>('tests', []);
+                    const merged = [...remoteTests, ...localTests];
+                    const unique = Array.from(new Map(merged.map(t => [t.id, t])).values());
+                    saveToStorage('tests', unique);
+                }
+            }
+        }
+        
+        // Fetch history from backend
+        if (config.syncResults) {
+            const historyResponse = await fetch(`${config.url}/api/history`, {
+                method: 'GET',
+                headers,
+                mode: 'cors'
+            });
+            if (historyResponse.ok) {
+                const remoteHistory = await historyResponse.json();
+                if (Array.isArray(remoteHistory) && remoteHistory.length > 0) {
+                    const localHistory = getFromStorage<TestAttempt[]>('performanceHistory', []);
+                    const merged = [...remoteHistory, ...localHistory];
+                    saveToStorage('performanceHistory', merged);
+                }
+            }
+        }
+        
+        return { success: true, message: 'Data pulled from server' };
+    } catch (error) {
+        return { success: false, message: `Pull failed: ${(error as Error).message}` };
+    }
+}
+
+// Auto-sync after test completion (called from submit logic)
+async function autoSyncAfterTest(): Promise<void> {
+    const config = getBackendConfig();
+    if (config.connected && config.autoSync) {
+        await syncToBackend();
     }
 }
 
@@ -447,7 +660,7 @@ restoreFileInput.addEventListener('change', (event) => {
                     saveToStorage('tests', uniqueTests);
                     saveToStorage('performanceHistory', newHistory);
 
-                    alert("Data restored successfully!");
+                    showToast("Data restored successfully!", 'success');
                     // Reload current view if necessary
                     if (!allTestsView.classList.contains('hidden')) renderAllTests();
                     if (!performanceView.classList.contains('hidden')) renderPerformanceHistory();
@@ -466,7 +679,7 @@ restoreFileInput.addEventListener('change', (event) => {
                     tests.unshift(newTest);
                     saveToStorage('tests', tests);
 
-                    alert(`Test "${data.name}" imported successfully!`);
+                    showToast(`Test "${data.name}" imported successfully!`, 'success');
                     if (!allTestsView.classList.contains('hidden')) renderAllTests();
                 }
             } 
@@ -476,7 +689,7 @@ restoreFileInput.addEventListener('change', (event) => {
 
         } catch (error) {
             console.error("Error restoring data:", error);
-            alert(`Failed to restore data. ${error.message}`);
+            showToast(`Failed to restore data. ${error.message}`, 'error');
         } finally {
             input.value = ''; // Reset input
         }
@@ -536,6 +749,245 @@ analyticsModal.addEventListener('click', (e) => {
     if (e.target === analyticsModal) {
         analyticsModal.classList.add('hidden');
     }
+});
+
+// --- Settings Modal & Backend Sync Event Listeners ---
+const settingsModal = document.getElementById('settings-modal');
+const settingsBtn = document.getElementById('settings-btn');
+const closeSettingsBtn = document.getElementById('close-settings-btn');
+const syncBtn = document.getElementById('sync-btn');
+const backendUrlInput = document.getElementById('backend-url') as HTMLInputElement;
+const apiKeyInput = document.getElementById('api-key') as HTMLInputElement;
+const testConnectionBtn = document.getElementById('test-connection-btn');
+const connectBackendBtn = document.getElementById('connect-backend-btn');
+const connectionResult = document.getElementById('connection-result');
+const autoSyncCheckbox = document.getElementById('auto-sync') as HTMLInputElement;
+const syncResultsCheckbox = document.getElementById('sync-results') as HTMLInputElement;
+const syncTestsCheckbox = document.getElementById('sync-tests') as HTMLInputElement;
+const manualSyncBtn = document.getElementById('manual-sync-btn');
+const exportDataBtn = document.getElementById('export-data-btn');
+const importDataBtn = document.getElementById('import-data-btn');
+
+// Open settings modal
+settingsBtn?.addEventListener('click', () => {
+    loadSettingsToModal();
+    settingsModal?.classList.remove('hidden');
+});
+
+// Close settings modal
+closeSettingsBtn?.addEventListener('click', () => {
+    settingsModal?.classList.add('hidden');
+});
+
+// Close settings modal when clicking outside
+settingsModal?.addEventListener('click', (e) => {
+    if (e.target === settingsModal) {
+        settingsModal.classList.add('hidden');
+    }
+});
+
+// Load settings into modal inputs
+function loadSettingsToModal(): void {
+    const config = getBackendConfig();
+    if (backendUrlInput) backendUrlInput.value = config.url;
+    if (apiKeyInput) apiKeyInput.value = config.apiKey;
+    if (autoSyncCheckbox) autoSyncCheckbox.checked = config.autoSync;
+    if (syncResultsCheckbox) syncResultsCheckbox.checked = config.syncResults;
+    if (syncTestsCheckbox) syncTestsCheckbox.checked = config.syncTests;
+    updateSyncStatusUI(config);
+}
+
+// Test connection button
+testConnectionBtn?.addEventListener('click', async () => {
+    const url = backendUrlInput?.value.trim().replace(/\/+$/, ''); // Remove trailing slashes
+    const apiKey = apiKeyInput?.value.trim();
+    
+    if (!url) {
+        showConnectionResult('Please enter a backend URL', false);
+        return;
+    }
+    
+    testConnectionBtn.textContent = 'Testing...';
+    (testConnectionBtn as HTMLButtonElement).disabled = true;
+    
+    const result = await testBackendConnection(url, apiKey);
+    showConnectionResult(result.message, result.success);
+    
+    testConnectionBtn.innerHTML = '<span class="material-symbols-outlined">wifi_tethering</span> Test Connection';
+    (testConnectionBtn as HTMLButtonElement).disabled = false;
+});
+
+// Connect & Sync button
+connectBackendBtn?.addEventListener('click', async () => {
+    const url = backendUrlInput?.value.trim().replace(/\/+$/, '');
+    const apiKey = apiKeyInput?.value.trim();
+    
+    if (!url) {
+        showConnectionResult('Please enter a backend URL', false);
+        return;
+    }
+    
+    connectBackendBtn.innerHTML = '<span class="material-symbols-outlined">sync</span> Connecting...';
+    (connectBackendBtn as HTMLButtonElement).disabled = true;
+    
+    // Test connection first
+    const testResult = await testBackendConnection(url, apiKey);
+    
+    if (testResult.success) {
+        // Save configuration
+        const config: BackendConfig = {
+            url,
+            apiKey,
+            autoSync: autoSyncCheckbox?.checked ?? true,
+            syncResults: syncResultsCheckbox?.checked ?? true,
+            syncTests: syncTestsCheckbox?.checked ?? true,
+            connected: true,
+            lastSync: null
+        };
+        saveBackendConfig(config);
+        
+        // Sync data
+        const syncResult = await syncToBackend();
+        
+        if (syncResult.success) {
+            showConnectionResult(`Connected and synced! ${syncResult.message}`, true);
+            showToast('Backend connected successfully!', 'success');
+        } else {
+            showConnectionResult(`Connected but sync failed: ${syncResult.message}`, false);
+        }
+    } else {
+        showConnectionResult(testResult.message, false);
+    }
+    
+    connectBackendBtn.innerHTML = '<span class="material-symbols-outlined">cloud_done</span> Connect & Sync';
+    (connectBackendBtn as HTMLButtonElement).disabled = false;
+});
+
+// Show connection result
+function showConnectionResult(message: string, success: boolean): void {
+    if (connectionResult) {
+        connectionResult.textContent = message;
+        connectionResult.classList.remove('hidden', 'success', 'error');
+        connectionResult.classList.add(success ? 'success' : 'error');
+    }
+}
+
+// Save sync options when changed
+autoSyncCheckbox?.addEventListener('change', updateSyncOptions);
+syncResultsCheckbox?.addEventListener('change', updateSyncOptions);
+syncTestsCheckbox?.addEventListener('change', updateSyncOptions);
+
+function updateSyncOptions(): void {
+    const config = getBackendConfig();
+    config.autoSync = autoSyncCheckbox?.checked ?? true;
+    config.syncResults = syncResultsCheckbox?.checked ?? true;
+    config.syncTests = syncTestsCheckbox?.checked ?? true;
+    saveBackendConfig(config);
+}
+
+// Manual sync button
+manualSyncBtn?.addEventListener('click', async () => {
+    const config = getBackendConfig();
+    if (!config.connected) {
+        showToast('Please connect to a backend first', 'error');
+        return;
+    }
+    
+    manualSyncBtn.innerHTML = '<span class="material-symbols-outlined">sync</span> Syncing...';
+    (manualSyncBtn as HTMLButtonElement).disabled = true;
+    
+    // Pull from backend first, then push
+    await syncFromBackend();
+    const result = await syncToBackend();
+    
+    if (result.success) {
+        showToast('Sync completed successfully!', 'success');
+    } else {
+        showToast(`Sync failed: ${result.message}`, 'error');
+    }
+    
+    manualSyncBtn.innerHTML = '<span class="material-symbols-outlined">sync</span> Manual Sync Now';
+    (manualSyncBtn as HTMLButtonElement).disabled = false;
+    
+    // Refresh current view if needed
+    if (!allTestsView.classList.contains('hidden')) renderAllTests();
+    if (!performanceView.classList.contains('hidden')) renderPerformanceHistory();
+});
+
+// Export data button
+exportDataBtn?.addEventListener('click', () => {
+    const tests = getFromStorage<Test[]>('tests', []);
+    const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+    const config = getBackendConfig();
+    
+    const exportData = {
+        tests,
+        performanceHistory: history,
+        exportedAt: new Date().toISOString(),
+        version: '1.0'
+    };
+    
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `upsc_test_generator_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    showToast('Data exported successfully!', 'success');
+});
+
+// Import data button (triggers file input)
+importDataBtn?.addEventListener('click', () => {
+    restoreFileInput.click();
+});
+
+// Sync button in header
+syncBtn?.addEventListener('click', async () => {
+    const config = getBackendConfig();
+    
+    if (!config.connected) {
+        // Open settings modal if not connected
+        loadSettingsToModal();
+        settingsModal?.classList.remove('hidden');
+        return;
+    }
+    
+    // Perform manual sync
+    syncBtn.classList.add('syncing');
+    
+    await syncFromBackend();
+    const result = await syncToBackend();
+    
+    syncBtn.classList.remove('syncing');
+    
+    if (result.success) {
+        showToast('Synced!', 'success');
+    } else {
+        showToast(`Sync failed: ${result.message}`, 'error');
+    }
+});
+
+// Collapsible section toggle
+document.querySelectorAll('.section-toggle').forEach(toggle => {
+    toggle.addEventListener('click', () => {
+        const content = toggle.nextElementSibling;
+        const icon = toggle.querySelector('.toggle-icon');
+        const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+        
+        toggle.setAttribute('aria-expanded', (!isExpanded).toString());
+        content?.classList.toggle('hidden');
+        
+        if (icon) {
+            icon.textContent = isExpanded ? 'expand_more' : 'expand_less';
+        }
+    });
+});
+
+// Initialize sync status on page load
+document.addEventListener('DOMContentLoaded', () => {
+    updateSyncStatusUI(getBackendConfig());
 });
 
 // Sidebar toggle for mobile test attempt view
@@ -670,9 +1122,191 @@ document.querySelectorAll('.clear-text-btn').forEach(btn => {
 
 generateTestBtn.addEventListener('click', handleGenerateTest);
 
+// ===== BULK IMPORT PARSER - Works without AI =====
+function parseManualQuestions(text: string): Question[] {
+    const questions: Question[] = [];
+    
+    // Split by question patterns
+    // Supports: 1. Question, Q1. Question, Q.1 Question, 1) Question, (1) Question
+    const questionBlocks = text.split(/(?=(?:^|\n)\s*(?:\d+[\.\)]\s*|\(?Q?\.?\d*\)?\.?\s*|Q\s*\.?\s*\d*\.?\s*)(?=[A-Z]))/i)
+        .filter(block => block.trim());
+    
+    questionBlocks.forEach((block, blockIndex) => {
+        try {
+            const lines = block.trim();
+            if (!lines || lines.length < 10) return;
+            
+            // Extract question text - everything before options start
+            let questionText = '';
+            let optionsText = '';
+            let answerText = '';
+            let explanationText = '';
+            let subjectText = '';
+            let topicText = '';
+            
+            // Split into sections
+            const answerMatch = lines.match(/(?:Answer|Ans|उत्तर|सही उत्तर)\s*[:.-]?\s*([a-dA-D1-4])/i);
+            const explanationMatch = lines.match(/(?:Explanation|Exp|व्याख्या|विवरण)\s*[:.-]?\s*([\s\S]*?)(?=(?:Subject|Topic|विषय|$))/i);
+            const subjectMatch = lines.match(/(?:Subject|विषय)\s*[:.-]?\s*([^||\n]+)/i);
+            const topicMatch = lines.match(/(?:Topic|टॉपिक)\s*[:.-]?\s*([^||\n]+)/i);
+            
+            // Extract answer
+            if (answerMatch) {
+                const ans = answerMatch[1].toLowerCase();
+                answerText = ans;
+            }
+            
+            // Extract explanation
+            if (explanationMatch) {
+                explanationText = explanationMatch[1].trim();
+            }
+            
+            // Extract subject and topic
+            if (subjectMatch) {
+                subjectText = subjectMatch[1].trim();
+            }
+            if (topicMatch) {
+                topicText = topicMatch[1].trim();
+            }
+            
+            // Parse options - supports multiple formats
+            // Format 1: a) option  b) option OR A) option B) option
+            // Format 2: a. option  b. option
+            // Format 3: (a) option (b) option
+            // Format 4: 1) option 2) option
+            const optionPatterns = [
+                /([a-d])\s*[\)\.\]]\s*([^a-d\)\.\]]*?)(?=(?:[a-d]\s*[\)\.\]]|Answer|Ans|Explanation|Subject|Topic|$))/gi,
+                /\(([a-d])\)\s*([^()]*?)(?=(?:\([a-d]\)|Answer|Ans|Explanation|Subject|Topic|$))/gi,
+                /([1-4])\s*[\)\.\]]\s*([^1-4\)\.\]]*?)(?=(?:[1-4]\s*[\)\.\]]|Answer|Ans|Explanation|Subject|Topic|$))/gi,
+            ];
+            
+            let options: string[] = [];
+            let optionsEndIndex = lines.length;
+            
+            // Try to find options
+            for (const pattern of optionPatterns) {
+                const matches = [...lines.matchAll(pattern)];
+                if (matches.length >= 2) {
+                    options = [];
+                    matches.forEach(match => {
+                        const optText = match[2].trim()
+                            .replace(/Answer.*$/i, '')
+                            .replace(/Explanation.*$/i, '')
+                            .replace(/Subject.*$/i, '')
+                            .replace(/Topic.*$/i, '')
+                            .trim();
+                        if (optText) {
+                            options.push(optText);
+                        }
+                    });
+                    
+                    if (options.length >= 2) {
+                        // Find where options start
+                        const firstOptMatch = lines.match(/([a-d1-4])\s*[\)\.\]]/i);
+                        if (firstOptMatch) {
+                            optionsEndIndex = firstOptMatch.index || 0;
+                        }
+                        break;
+                    }
+                }
+            }
+            
+            // Extract question text (everything before options)
+            questionText = lines.substring(0, optionsEndIndex)
+                .replace(/^[\s\d\.\)\(Q]+/i, '') // Remove question number prefix
+                .replace(/\s+/g, ' ')
+                .trim();
+            
+            // Ensure we have at least 4 options (pad if needed)
+            while (options.length < 4) {
+                options.push(`Option ${options.length + 1}`);
+            }
+            options = options.slice(0, 4); // Keep only first 4
+            
+            // Convert answer to index
+            let answerIndex = 0;
+            if (answerText) {
+                if (/[a-d]/i.test(answerText)) {
+                    answerIndex = answerText.toLowerCase().charCodeAt(0) - 97; // a=0, b=1, etc.
+                } else if (/[1-4]/.test(answerText)) {
+                    answerIndex = parseInt(answerText) - 1;
+                }
+            }
+            answerIndex = Math.max(0, Math.min(3, answerIndex));
+            
+            // Only add if we have valid question and options
+            if (questionText && questionText.length > 5 && options.filter(o => o && o.length > 0).length >= 2) {
+                questions.push({
+                    question: questionText,
+                    options: options,
+                    answer: answerIndex,
+                    explanation: explanationText || 'No explanation provided.',
+                    subject: subjectText || 'General',
+                    topic: topicText || 'Miscellaneous'
+                });
+            }
+        } catch (e) {
+            console.warn(`Failed to parse question block ${blockIndex}:`, e);
+        }
+    });
+    
+    return questions;
+}
+
 async function handleGenerateTest() {
+    const numQuestions = parseInt(questionsSlider.value, 10);
+    const language = languageSelect.value;
+    const testName = testNameInput.value.trim();
+    const marks = parseFloat(marksInput.value) || 1;
+    const negative = parseFloat(negativeInput.value) || 0;
+
+    // Handle Bulk Import WITHOUT AI
+    if (activeTabInput.type === 'manual') {
+        const manualText = manualInput.value.trim();
+        if (!manualText) {
+            showToast('Please paste your questions in the text area.', 'error');
+            return;
+        }
+        
+        loader.classList.remove('hidden');
+        generateTestBtn.disabled = true;
+        
+        try {
+            // Parse questions locally without AI
+            const parsedQuestions = parseManualQuestions(manualText);
+            
+            if (parsedQuestions.length === 0) {
+                throw new Error('Could not parse any questions. Please check the format and try again.');
+            }
+            
+            currentTest = {
+                id: `test_${Date.now()}`,
+                name: testName || `Bulk Import Test`,
+                questions: parsedQuestions,
+                duration: parseInt(durationInput.value, 10),
+                language: language,
+                createdAt: new Date().toISOString(),
+                marksPerQuestion: marks,
+                negativeMarking: negative
+            };
+            
+            showToast(`Successfully imported ${parsedQuestions.length} questions!`, 'success');
+            renderEditableTest(currentTest);
+            showView(editTestView);
+            
+        } catch (error) {
+            console.error("Error parsing questions:", error);
+            showToast(`Failed to import: ${error.message}`, 'error');
+        } finally {
+            loader.classList.add('hidden');
+            generateTestBtn.disabled = false;
+        }
+        return;
+    }
+
+    // For AI-based generation
     if (!ai) {
-        alert("AI Service is not available.");
+        showToast("AI Service is not available. Use Bulk Import for manual questions.", 'error');
         return;
     }
 
@@ -681,12 +1315,6 @@ async function handleGenerateTest() {
 
     let source = "Custom Input";
     let contentsForApi;
-
-    const numQuestions = parseInt(questionsSlider.value, 10);
-    const language = languageSelect.value;
-    const testName = testNameInput.value.trim();
-    const marks = parseFloat(marksInput.value) || 1;
-    const negative = parseFloat(negativeInput.value) || 0;
 
     try {
         switch (activeTabInput.type) {
@@ -703,27 +1331,6 @@ async function handleGenerateTest() {
                 source = "Pasted Text";
                 const promptText = `Generate ${numQuestions} UPSC-style multiple-choice questions (4 options) based on the following text: """${text}""". The questions should be in ${language}. For each question, provide the question, four options, the 0-indexed correct answer, a detailed explanation, the general subject, and the specific topic.`;
                 contentsForApi = promptText;
-                break;
-            case 'manual':
-                const manualText = manualInput.value.trim();
-                if (!manualText) throw new Error('Please paste your questions in the text area.');
-                source = "Bulk Import";
-                const promptManual = `Analyze the following text and extract ALL multiple-choice questions found within it.
-                
-                The text is expected to contain questions in a format similar to:
-                "Q. Question text... A) Opt1 B) Opt2... Answer: A Explanation: ..."
-                
-                Your task:
-                1. Extract every valid question.
-                2. Map options to a string array.
-                3. Determine the correct answer index (0 for A/1, 1 for B/2, etc).
-                4. Extract explanation if present, otherwise generate a brief one.
-                5. Extract Subject and Topic if present, otherwise infer them from the question content.
-                6. Return the result strictly as a JSON array matching the schema.
-                
-                Input Text:
-                """${manualText}"""`;
-                contentsForApi = promptManual;
                 break;
             case 'file':
                 const file = fileUpload.files[0];
@@ -825,7 +1432,7 @@ async function handleGenerateTest() {
         showView(editTestView);
     } catch (error) {
         console.error("Error generating test:", error);
-        alert(`Failed to generate test. ${error.message}`);
+        showToast(`Failed to generate test. ${error.message}`, 'error');
     } finally {
         (loader.querySelector('p') as HTMLElement).textContent = 'Generating your test, please wait...';
         loader.classList.add('hidden');
@@ -1010,10 +1617,10 @@ saveTestBtn.addEventListener('click', () => {
     
     if (existingIndex > -1) {
         tests[existingIndex] = currentTest;
-        alert('Test updated successfully!');
+        showToast('Test updated successfully!', 'success');
     } else {
         tests.unshift(currentTest);
-        alert('Test created successfully!');
+        showToast('Test created and saved!', 'success');
     }
     
     saveToStorage('tests', tests);
@@ -1025,41 +1632,116 @@ saveTestBtn.addEventListener('click', () => {
 // --- All Tests & Test Detail Logic ---
 function renderAllTests() {
     const tests = getFromStorage<Test[]>('tests', []);
+    const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+    
     if (tests.length === 0) {
-        allTestsContainer.innerHTML = `<p class="placeholder">You haven't saved any tests yet.</p>`;
+        allTestsContainer.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <span class="material-symbols-outlined">library_books</span>
+                </div>
+                <h3>No Tests Yet</h3>
+                <p>Create your first test to get started!</p>
+                <button class="action-btn save-btn" onclick="document.querySelector('.card[aria-labelledby=\\'create-test-title\\']').click()">
+                    <span class="material-symbols-outlined">add</span> Create Test
+                </button>
+            </div>`;
         return;
     }
-    allTestsContainer.innerHTML = tests.map(test => {
+    
+    // Calculate stats for each test
+    const testStats: { [id: string]: { attempts: number, bestScore: number, lastAttempt: string | null } } = {};
+    tests.forEach(test => {
+        const attempts = history.filter(h => h.testId === test.id);
+        testStats[test.id] = {
+            attempts: attempts.length,
+            bestScore: attempts.length > 0 ? Math.max(...attempts.map(a => a.score)) : 0,
+            lastAttempt: attempts.length > 0 ? attempts[0].completedAt : null
+        };
+    });
+    
+    allTestsContainer.innerHTML = tests.map((test, index) => {
         const dateObj = new Date(test.createdAt);
-        const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        const stats = testStats[test.id];
+        const totalMarks = test.questions.length * (test.marksPerQuestion || 1);
+        const subjects = [...new Set(test.questions.map(q => q.subject))].filter(s => s).slice(0, 2);
         
         return `
-        <div class="saved-test-item" data-testid="${test.id}">
-            <div>
+        <div class="saved-test-item animated-card" data-testid="${test.id}" style="animation-delay: ${index * 50}ms">
+            <div class="test-card-header">
+                <div class="test-badge">${test.language}</div>
+                <div class="test-number">#${tests.length - index}</div>
+            </div>
+            <div class="test-card-body">
                 <h3>${test.name}</h3>
-                <p>Created on ${date}</p>
+                <p class="test-date">
+                    <span class="material-symbols-outlined">calendar_today</span> Created ${date}
+                </p>
+                ${subjects.length > 0 ? `
+                <div class="test-subjects">
+                    ${subjects.map(s => `<span class="subject-tag">${s}</span>`).join('')}
+                    ${[...new Set(test.questions.map(q => q.subject))].length > 2 ? `<span class="subject-tag more">+${[...new Set(test.questions.map(q => q.subject))].length - 2}</span>` : ''}
+                </div>
+                ` : ''}
             </div>
-            <div class="test-stats-preview">
-                 <div class="stat-pill">
-                    <span class="material-symbols-outlined">quiz</span> ${test.questions.length} Questions
-                 </div>
-                 <div class="stat-pill">
-                    <span class="material-symbols-outlined">timer</span> ${test.duration} mins
-                 </div>
+            <div class="test-stats-grid">
+                <div class="test-stat-item">
+                    <span class="material-symbols-outlined">quiz</span>
+                    <div class="stat-content">
+                        <span class="stat-num">${test.questions.length}</span>
+                        <span class="stat-text">Questions</span>
+                    </div>
+                </div>
+                <div class="test-stat-item">
+                    <span class="material-symbols-outlined">timer</span>
+                    <div class="stat-content">
+                        <span class="stat-num">${test.duration}</span>
+                        <span class="stat-text">Minutes</span>
+                    </div>
+                </div>
+                <div class="test-stat-item">
+                    <span class="material-symbols-outlined">stars</span>
+                    <div class="stat-content">
+                        <span class="stat-num">${totalMarks}</span>
+                        <span class="stat-text">Marks</span>
+                    </div>
+                </div>
+                <div class="test-stat-item ${stats.attempts > 0 ? 'has-attempts' : ''}">
+                    <span class="material-symbols-outlined">history</span>
+                    <div class="stat-content">
+                        <span class="stat-num">${stats.attempts}</span>
+                        <span class="stat-text">Attempts</span>
+                    </div>
+                </div>
             </div>
+            ${stats.attempts > 0 ? `
+            <div class="test-performance-preview">
+                <div class="best-score">
+                    <span class="label">Best Score</span>
+                    <span class="value ${stats.bestScore >= 60 ? 'good' : stats.bestScore >= 40 ? 'avg' : 'low'}">${stats.bestScore.toFixed(1)}%</span>
+                </div>
+                <div class="mini-progress-bar">
+                    <div class="mini-progress-fill" style="width: ${stats.bestScore}%; background: ${stats.bestScore >= 60 ? 'var(--success-color)' : stats.bestScore >= 40 ? 'var(--warning-color)' : 'var(--danger-color)'}"></div>
+                </div>
+            </div>
+            ` : ''}
             <div class="test-card-actions">
-                <button class="start-btn" aria-label="Start Test" title="Start Test">
-                     <span class="material-symbols-outlined">play_arrow</span> Start
+                <button class="start-btn primary-action" aria-label="Start Test" title="Start Test">
+                    <span class="material-symbols-outlined">play_arrow</span>
+                    <span class="btn-label">Start Test</span>
                 </button>
-                 <button class="edit-btn" aria-label="Edit Test" title="Edit Test">
-                     <span class="material-symbols-outlined">edit</span>
-                </button>
-                <button class="download-test-btn" aria-label="Download JSON" title="Download">
-                     <span class="material-symbols-outlined">download</span>
-                </button>
-                <button class="delete-btn" aria-label="Delete Test" title="Delete">
-                     <span class="material-symbols-outlined">delete</span>
-                </button>
+                <div class="secondary-actions">
+                    <button class="edit-btn icon-action" aria-label="Edit Test" title="Edit Test">
+                        <span class="material-symbols-outlined">edit</span>
+                    </button>
+                    <button class="download-test-btn icon-action" aria-label="Download JSON" title="Download">
+                        <span class="material-symbols-outlined">download</span>
+                    </button>
+                    <button class="delete-btn icon-action danger" aria-label="Delete Test" title="Delete">
+                        <span class="material-symbols-outlined">delete</span>
+                    </button>
+                </div>
             </div>
         </div>
     `}).join('');
@@ -1136,19 +1818,19 @@ function handleImportTest(event: Event) {
             tests.unshift(newTest);
             saveToStorage('tests', tests);
 
-            alert(`Test "${newTest.name}" imported successfully!`);
+            showToast(`Test "${newTest.name}" imported successfully!`, 'success');
             renderAllTests();
 
         } catch (error) {
             console.error("Error importing test:", error);
-            alert(`Failed to import test. ${error.message}`);
+            showToast(`Failed to import test. ${error.message}`, 'error');
         } finally {
             // Reset input value to allow re-uploading the same file
             input.value = '';
         }
     };
     reader.onerror = () => {
-         alert('Error reading the file.');
+         showToast('Error reading the file.', 'error');
          input.value = '';
     };
     reader.readAsText(file);
@@ -1220,7 +1902,7 @@ testDetailActions.addEventListener('click', e => {
             let tests = getFromStorage<Test[]>('tests', []);
             tests = tests.filter(t => t.id !== currentTest.id);
             saveToStorage('tests', tests);
-            alert('Test deleted.');
+            showToast('Test deleted.', 'info');
             renderAllTests();
             showView(allTestsView);
         }
@@ -1438,7 +2120,7 @@ function handleSubmitTest() {
 
         if (!currentTest) {
             console.error("Submission failed: currentTest is not available.");
-            alert("A critical error occurred: Test data is missing. Unable to submit.");
+            showToast("Critical error: Test data missing. Unable to submit.", 'error');
             showView(mainView); // Go back to the main menu for safety
             return;
         }
@@ -1486,6 +2168,9 @@ function handleSubmitTest() {
         history.unshift(attempt);
         saveToStorage('performanceHistory', history);
 
+        // Auto-sync to backend if configured
+        autoSyncAfterTest();
+
         currentTest = null; // Clear the current test state
         
         // Redirect directly to the full report instead of the history list
@@ -1494,7 +2179,7 @@ function handleSubmitTest() {
 
     } catch (error) {
         console.error("An unexpected error occurred during test submission:", error);
-        alert("An unexpected error occurred while submitting your test. Your progress could not be saved.");
+        showToast("Error submitting test. Progress may not be saved.", 'error');
         showView(mainView); // Fallback to main view on error
     }
 }
@@ -1511,7 +2196,7 @@ function startTimer() {
         
         if (timeRemaining <= 0) {
             stopTimer();
-            alert("Time's up! Your test will be submitted automatically.");
+            showToast("⏰ Time's up! Submitting your test...", 'warning');
             handleSubmitTest();
         }
     }, 1000);
@@ -1526,45 +2211,157 @@ function stopTimer() {
 function renderPerformanceHistory() {
     const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
     if (history.length === 0) {
-        performanceContainer.innerHTML = `<p class="placeholder">You haven't completed any tests yet.</p>`;
+        performanceContainer.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <span class="material-symbols-outlined">assessment</span>
+                </div>
+                <h3>No Results Yet</h3>
+                <p>Complete a test to see your performance history!</p>
+                <button class="action-btn save-btn" onclick="document.querySelector('.card[aria-labelledby=\\'all-tests-title\\']').click()">
+                    <span class="material-symbols-outlined">library_books</span> View Tests
+                </button>
+            </div>`;
         return;
     }
 
-    performanceContainer.innerHTML = history.map((attempt, index) => {
-        const dateObj = new Date(attempt.completedAt);
-        const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-        const time = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-        const scoreClass = attempt.score >= 50 ? 'pass' : 'fail';
-        const timeTakenStr = new Date(attempt.timeTaken * 1000).toISOString().substr(14, 5); // MM:SS
-
-        return `
-        <div class="history-card" data-attempt-index="${index}">
-            <div class="history-info">
-                <h3>${attempt.testName}</h3>
-                <div class="history-meta">
-                    <span title="Date"><span class="material-symbols-outlined">calendar_today</span> ${date} at ${time}</span>
+    // Calculate overall stats
+    const totalTests = history.length;
+    const avgScore = history.reduce((sum, h) => sum + h.score, 0) / totalTests;
+    const bestScore = Math.max(...history.map(h => h.score));
+    const totalQuestions = history.reduce((sum, h) => sum + h.totalQuestions, 0);
+    const totalCorrect = history.reduce((sum, h) => sum + h.correctAnswers, 0);
+    
+    // Quick stats header
+    let headerHTML = `
+        <div class="results-overview-header">
+            <div class="overview-stat">
+                <span class="material-symbols-outlined">history</span>
+                <div class="overview-content">
+                    <span class="overview-value">${totalTests}</span>
+                    <span class="overview-label">Tests Completed</span>
                 </div>
             </div>
-            <div class="history-stats-preview">
-                 <div class="stat-pill">
-                    <span class="material-symbols-outlined">check_circle</span> ${attempt.correctAnswers} Correct
-                 </div>
-                 <div class="stat-pill">
-                    <span class="material-symbols-outlined">cancel</span> ${attempt.incorrectAnswers} Incorrect
-                 </div>
-                 <div class="stat-pill">
-                    <span class="material-symbols-outlined">timer</span> ${timeTakenStr}
-                 </div>
+            <div class="overview-stat">
+                <span class="material-symbols-outlined">percent</span>
+                <div class="overview-content">
+                    <span class="overview-value">${avgScore.toFixed(1)}%</span>
+                    <span class="overview-label">Avg Score</span>
+                </div>
             </div>
-            <div class="history-score-area">
-                <div class="score-badge ${scoreClass}">${attempt.score.toFixed(2)}%</div>
-                <p class="accuracy-label">Accuracy</p>
+            <div class="overview-stat">
+                <span class="material-symbols-outlined">emoji_events</span>
+                <div class="overview-content">
+                    <span class="overview-value best">${bestScore.toFixed(1)}%</span>
+                    <span class="overview-label">Best Score</span>
+                </div>
             </div>
-            <button class="view-test-btn" style="width: 100%; margin-top: 1rem;">
-                <span class="material-symbols-outlined">analytics</span> View Detailed Analysis
+            <div class="overview-stat">
+                <span class="material-symbols-outlined">check_circle</span>
+                <div class="overview-content">
+                    <span class="overview-value">${totalCorrect}/${totalQuestions}</span>
+                    <span class="overview-label">Correct Answers</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    let historyHTML = history.map((attempt, index) => {
+        const dateObj = new Date(attempt.completedAt);
+        const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        const time = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        const scoreClass = attempt.score >= 60 ? 'excellent' : attempt.score >= 40 ? 'good' : 'poor';
+        const timeTakenMins = Math.floor(attempt.timeTaken / 60);
+        const timeTakenSecs = attempt.timeTaken % 60;
+        const accuracy = attempt.correctAnswers + attempt.incorrectAnswers > 0 
+            ? (attempt.correctAnswers / (attempt.correctAnswers + attempt.incorrectAnswers)) * 100 
+            : 0;
+        
+        // Calculate performance trend indicator
+        const prevAttempts = history.slice(index + 1, index + 4).filter(h => h.testId === attempt.testId);
+        let trendIcon = '';
+        let trendClass = '';
+        if (prevAttempts.length > 0) {
+            const prevAvg = prevAttempts.reduce((sum, h) => sum + h.score, 0) / prevAttempts.length;
+            if (attempt.score > prevAvg + 5) {
+                trendIcon = 'trending_up';
+                trendClass = 'trend-up';
+            } else if (attempt.score < prevAvg - 5) {
+                trendIcon = 'trending_down';
+                trendClass = 'trend-down';
+            } else {
+                trendIcon = 'trending_flat';
+                trendClass = 'trend-flat';
+            }
+        }
+
+        return `
+        <div class="history-card enhanced" data-attempt-index="${index}" style="animation-delay: ${index * 50}ms">
+            <div class="history-card-content">
+                <div class="history-header">
+                    <div class="history-title-area">
+                        <h3>${attempt.testName}</h3>
+                        <div class="history-meta">
+                            <span class="meta-item">
+                                <span class="material-symbols-outlined">schedule</span>
+                                ${date} • ${time}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="score-ring ${scoreClass}">
+                        <svg viewBox="0 0 36 36">
+                            <path class="score-ring-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                            <path class="score-ring-fill" stroke-dasharray="${attempt.score}, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                        </svg>
+                        <div class="score-ring-value">${attempt.score.toFixed(0)}%</div>
+                        ${trendIcon ? `<span class="trend-indicator ${trendClass}" title="Performance trend"><span class="material-symbols-outlined">${trendIcon}</span></span>` : ''}
+                    </div>
+                </div>
+                
+                <div class="history-stats-bar">
+                    <div class="stat-segment correct" style="flex: ${attempt.correctAnswers}">
+                        <span class="segment-value">${attempt.correctAnswers}</span>
+                    </div>
+                    <div class="stat-segment incorrect" style="flex: ${attempt.incorrectAnswers}">
+                        <span class="segment-value">${attempt.incorrectAnswers}</span>
+                    </div>
+                    <div class="stat-segment unanswered" style="flex: ${attempt.unanswered}">
+                        <span class="segment-value">${attempt.unanswered}</span>
+                    </div>
+                </div>
+                
+                <div class="history-details-grid">
+                    <div class="detail-item">
+                        <span class="material-symbols-outlined">quiz</span>
+                        <span class="detail-value">${attempt.totalQuestions}</span>
+                        <span class="detail-label">Questions</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="material-symbols-outlined">timer</span>
+                        <span class="detail-value">${timeTakenMins}m ${timeTakenSecs}s</span>
+                        <span class="detail-label">Time</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="material-symbols-outlined">track_changes</span>
+                        <span class="detail-value">${accuracy.toFixed(0)}%</span>
+                        <span class="detail-label">Accuracy</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="material-symbols-outlined">speed</span>
+                        <span class="detail-value">${(attempt.timeTaken / attempt.totalQuestions).toFixed(1)}s</span>
+                        <span class="detail-label">Avg/Q</span>
+                    </div>
+                </div>
+            </div>
+            
+            <button class="view-analysis-btn">
+                <span>View Detailed Analysis</span>
+                <span class="material-symbols-outlined">arrow_forward</span>
             </button>
         </div>
     `}).join('');
+
+    performanceContainer.innerHTML = headerHTML + `<div class="history-grid">${historyHTML}</div>`;
 }
 
 performanceContainer.addEventListener('click', (e) => {
@@ -1790,30 +2587,127 @@ function renderTimeAnalysisCharts(attempt: TestAttempt) {
     const avgTime = attempt.timePerQuestion.reduce((a, b) => a + b, 0) / attempt.timePerQuestion.length;
     const maxTime = Math.max(...attempt.timePerQuestion, 1);
     const minTime = Math.min(...attempt.timePerQuestion);
-    const medianTime = [...attempt.timePerQuestion].sort((a, b) => a - b)[Math.floor(attempt.timePerQuestion.length / 2)];
+    const sortedTimes = [...attempt.timePerQuestion].sort((a, b) => a - b);
+    const medianTime = sortedTimes[Math.floor(sortedTimes.length / 2)];
+    const totalTime = attempt.timePerQuestion.reduce((a, b) => a + b, 0);
     
-    // Time Statistics Cards
+    // Calculate standard deviation for consistency analysis
+    const variance = attempt.timePerQuestion.reduce((sum, time) => sum + Math.pow(time - avgTime, 2), 0) / attempt.timePerQuestion.length;
+    const stdDev = Math.sqrt(variance);
+    const consistencyScore = Math.max(0, 100 - (stdDev / avgTime) * 100);
+    
+    // Time efficiency - how much time was wasted on incorrect answers
+    let timeOnCorrect = 0, timeOnIncorrect = 0, timeOnUnanswered = 0;
+    attempt.timePerQuestion.forEach((time, i) => {
+        if (attempt.userAnswers[i] === null) {
+            timeOnUnanswered += time;
+        } else if (attempt.userAnswers[i] === attempt.fullTest.questions[i].answer) {
+            timeOnCorrect += time;
+        } else {
+            timeOnIncorrect += time;
+        }
+    });
+    
+    const timeEfficiency = totalTime > 0 ? (timeOnCorrect / totalTime) * 100 : 0;
+    
+    // Time Statistics Cards - Enhanced
     let timeStatsHTML = `
-        <div class="time-stats-grid">
-            <div class="time-stat-card">
-                <span class="material-symbols-outlined">avg_time</span>
-                <div class="time-stat-value">${avgTime.toFixed(1)}s</div>
-                <div class="time-stat-label">Average</div>
+        <div class="time-analysis-header">
+            <h4><span class="material-symbols-outlined">schedule</span> Time Performance Overview</h4>
+        </div>
+        <div class="time-stats-grid enhanced">
+            <div class="time-stat-card highlight">
+                <div class="stat-icon-wrapper primary">
+                    <span class="material-symbols-outlined">avg_time</span>
+                </div>
+                <div class="time-stat-content">
+                    <div class="time-stat-value">${avgTime.toFixed(1)}s</div>
+                    <div class="time-stat-label">Average per Question</div>
+                </div>
             </div>
             <div class="time-stat-card">
-                <span class="material-symbols-outlined">arrow_upward</span>
-                <div class="time-stat-value">${maxTime.toFixed(1)}s</div>
-                <div class="time-stat-label">Maximum</div>
+                <div class="stat-icon-wrapper danger">
+                    <span class="material-symbols-outlined">arrow_upward</span>
+                </div>
+                <div class="time-stat-content">
+                    <div class="time-stat-value">${maxTime.toFixed(1)}s</div>
+                    <div class="time-stat-label">Slowest Question</div>
+                </div>
             </div>
             <div class="time-stat-card">
-                <span class="material-symbols-outlined">arrow_downward</span>
-                <div class="time-stat-value">${minTime.toFixed(1)}s</div>
-                <div class="time-stat-label">Minimum</div>
+                <div class="stat-icon-wrapper success">
+                    <span class="material-symbols-outlined">arrow_downward</span>
+                </div>
+                <div class="time-stat-content">
+                    <div class="time-stat-value">${minTime.toFixed(1)}s</div>
+                    <div class="time-stat-label">Fastest Question</div>
+                </div>
             </div>
             <div class="time-stat-card">
-                <span class="material-symbols-outlined">vertical_align_center</span>
-                <div class="time-stat-value">${medianTime.toFixed(1)}s</div>
-                <div class="time-stat-label">Median</div>
+                <div class="stat-icon-wrapper info">
+                    <span class="material-symbols-outlined">vertical_align_center</span>
+                </div>
+                <div class="time-stat-content">
+                    <div class="time-stat-value">${medianTime.toFixed(1)}s</div>
+                    <div class="time-stat-label">Median Time</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="time-efficiency-section">
+            <h4><span class="material-symbols-outlined">pie_chart</span> Time Allocation</h4>
+            <div class="time-pie-chart">
+                <div class="pie-visual">
+                    <svg viewBox="0 0 36 36" class="circular-chart">
+                        <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                        <path class="circle correct" stroke-dasharray="${(timeOnCorrect/totalTime*100)}, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                    </svg>
+                    <div class="pie-center">
+                        <span class="efficiency-value">${timeEfficiency.toFixed(0)}%</span>
+                        <span class="efficiency-label">Efficient</span>
+                    </div>
+                </div>
+                <div class="time-breakdown-list">
+                    <div class="breakdown-item correct">
+                        <div class="breakdown-indicator"></div>
+                        <div class="breakdown-info">
+                            <span class="breakdown-label">Time on Correct</span>
+                            <span class="breakdown-value">${Math.floor(timeOnCorrect / 60)}m ${(timeOnCorrect % 60).toFixed(0)}s</span>
+                        </div>
+                        <span class="breakdown-pct">${(timeOnCorrect/totalTime*100).toFixed(0)}%</span>
+                    </div>
+                    <div class="breakdown-item incorrect">
+                        <div class="breakdown-indicator"></div>
+                        <div class="breakdown-info">
+                            <span class="breakdown-label">Time on Incorrect</span>
+                            <span class="breakdown-value">${Math.floor(timeOnIncorrect / 60)}m ${(timeOnIncorrect % 60).toFixed(0)}s</span>
+                        </div>
+                        <span class="breakdown-pct">${(timeOnIncorrect/totalTime*100).toFixed(0)}%</span>
+                    </div>
+                    <div class="breakdown-item unanswered">
+                        <div class="breakdown-indicator"></div>
+                        <div class="breakdown-info">
+                            <span class="breakdown-label">Time on Unanswered</span>
+                            <span class="breakdown-value">${Math.floor(timeOnUnanswered / 60)}m ${(timeOnUnanswered % 60).toFixed(0)}s</span>
+                        </div>
+                        <span class="breakdown-pct">${(timeOnUnanswered/totalTime*100).toFixed(0)}%</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="consistency-meter">
+                <div class="consistency-header">
+                    <span class="consistency-title"><span class="material-symbols-outlined">balance</span> Time Consistency</span>
+                    <span class="consistency-score ${consistencyScore >= 70 ? 'good' : consistencyScore >= 40 ? 'avg' : 'poor'}">${consistencyScore.toFixed(0)}%</span>
+                </div>
+                <div class="consistency-bar">
+                    <div class="consistency-fill" style="width: ${consistencyScore}%; background: ${consistencyScore >= 70 ? 'var(--success-color)' : consistencyScore >= 40 ? 'var(--warning-color)' : 'var(--danger-color)'}"></div>
+                </div>
+                <p class="consistency-tip">${consistencyScore >= 70 
+                    ? '✨ Great! You maintain a consistent pace throughout the test.' 
+                    : consistencyScore >= 40 
+                    ? '💡 Your time varies. Try to maintain a more consistent pace.' 
+                    : '⚠️ High variance in time spent. Practice maintaining steady pace.'}</p>
             </div>
         </div>
     `;
@@ -2019,19 +2913,19 @@ function renderSubjectBreakdown(attempt: TestAttempt) {
     }).join('');
 }
 
-// Topic-wise analysis with graph
+// Topic-wise analysis with graph - Enhanced
 function renderTopicWiseAnalysis(attempt: TestAttempt) {
     const topicWiseContainer = document.getElementById('topic-wise-view');
     if (!topicWiseContainer) return;
     
-    const topicStats: { [key: string]: { correct: number, total: number, subject: string, avgTime: number, totalTime: number } } = {};
+    const topicStats: { [key: string]: { correct: number, total: number, incorrect: number, subject: string, avgTime: number, totalTime: number } } = {};
     
     attempt.fullTest.questions.forEach((q, i) => {
         const topic = q.topic || 'General';
         const subject = q.subject || 'Uncategorized';
         
         if (!topicStats[topic]) {
-            topicStats[topic] = { correct: 0, total: 0, subject, avgTime: 0, totalTime: 0 };
+            topicStats[topic] = { correct: 0, total: 0, incorrect: 0, subject, avgTime: 0, totalTime: 0 };
         }
         
         topicStats[topic].total++;
@@ -2039,6 +2933,8 @@ function renderTopicWiseAnalysis(attempt: TestAttempt) {
         
         if (attempt.userAnswers[i] === q.answer) {
             topicStats[topic].correct++;
+        } else if (attempt.userAnswers[i] !== null) {
+            topicStats[topic].incorrect++;
         }
     });
     
@@ -2056,49 +2952,115 @@ function renderTopicWiseAnalysis(attempt: TestAttempt) {
         }))
         .sort((a, b) => b.accuracy - a.accuracy);
     
-    // Find strongest and weakest topics
+    // Calculate overall topic stats
+    const totalTopics = sortedTopics.length;
+    const masteredTopics = sortedTopics.filter(t => t.accuracy >= 70).length;
+    const weakTopics = sortedTopics.filter(t => t.accuracy < 50);
     const strongTopics = sortedTopics.filter(t => t.accuracy >= 70).slice(0, 3);
-    const weakTopics = sortedTopics.filter(t => t.accuracy < 50).slice(-3).reverse();
+    const avgTopicAccuracy = sortedTopics.reduce((sum, t) => sum + t.accuracy, 0) / totalTopics;
     
     topicWiseContainer.innerHTML = `
-        <div class="topic-insights-grid">
-            <div class="insight-card strength">
-                <h4><span class="material-symbols-outlined">trending_up</span> Strong Topics</h4>
-                ${strongTopics.length > 0 ? strongTopics.map(t => `
-                    <div class="insight-item">
-                        <span class="topic-name">${t.topic}</span>
-                        <span class="topic-score" style="color: var(--success-color)">${t.accuracy.toFixed(0)}%</span>
-                    </div>
-                `).join('') : '<p class="no-data">No strong topics identified yet</p>'}
+        <div class="topic-overview-stats">
+            <div class="topic-overview-card">
+                <div class="topic-overview-icon mastered">
+                    <span class="material-symbols-outlined">workspace_premium</span>
+                </div>
+                <div class="topic-overview-content">
+                    <span class="topic-overview-value">${masteredTopics}/${totalTopics}</span>
+                    <span class="topic-overview-label">Topics Mastered (≥70%)</span>
+                </div>
             </div>
-            <div class="insight-card weakness">
-                <h4><span class="material-symbols-outlined">trending_down</span> Need Improvement</h4>
-                ${weakTopics.length > 0 ? weakTopics.map(t => `
-                    <div class="insight-item">
-                        <span class="topic-name">${t.topic}</span>
-                        <span class="topic-score" style="color: var(--danger-color)">${t.accuracy.toFixed(0)}%</span>
-                    </div>
-                `).join('') : '<p class="no-data">Great! No weak topics found</p>'}
+            <div class="topic-overview-card">
+                <div class="topic-overview-icon avg">
+                    <span class="material-symbols-outlined">percent</span>
+                </div>
+                <div class="topic-overview-content">
+                    <span class="topic-overview-value">${avgTopicAccuracy.toFixed(0)}%</span>
+                    <span class="topic-overview-label">Avg Topic Accuracy</span>
+                </div>
+            </div>
+            <div class="topic-overview-card">
+                <div class="topic-overview-icon weak">
+                    <span class="material-symbols-outlined">warning</span>
+                </div>
+                <div class="topic-overview-content">
+                    <span class="topic-overview-value">${weakTopics.length}</span>
+                    <span class="topic-overview-label">Topics Need Work (<50%)</span>
+                </div>
             </div>
         </div>
         
-        <h4 style="margin-top: 1.5rem;">All Topics Performance</h4>
-        <div class="topic-chart-container">
-            ${sortedTopics.map(t => {
-                const barColor = t.accuracy >= 70 ? 'var(--success-color)' : t.accuracy >= 50 ? 'var(--warning-color)' : 'var(--danger-color)';
-                return `
-                    <div class="topic-chart-row">
-                        <div class="topic-chart-label">
+        <div class="topic-insights-grid">
+            <div class="insight-card strength">
+                <h4><span class="material-symbols-outlined">emoji_events</span> Top Performing Topics</h4>
+                ${strongTopics.length > 0 ? strongTopics.map((t, i) => `
+                    <div class="insight-item ranked">
+                        <span class="rank-badge">#${i + 1}</span>
+                        <div class="insight-details">
                             <span class="topic-name">${t.topic}</span>
-                            <span class="topic-subject">${t.subject}</span>
+                            <span class="topic-subject-tag">${t.subject}</span>
                         </div>
-                        <div class="topic-chart-bar-container">
-                            <div class="topic-chart-bar" style="width: ${t.accuracy}%; background: ${barColor}"></div>
-                            <span class="topic-chart-value">${t.correct}/${t.total} (${t.accuracy.toFixed(0)}%)</span>
+                        <div class="insight-score-container">
+                            <span class="topic-score success">${t.accuracy.toFixed(0)}%</span>
+                            <span class="topic-ratio">${t.correct}/${t.total}</span>
                         </div>
                     </div>
-                `;
-            }).join('')}
+                `).join('') : '<p class="no-data">Complete more questions to see your strong topics</p>'}
+            </div>
+            <div class="insight-card weakness">
+                <h4><span class="material-symbols-outlined">priority_high</span> Focus Areas</h4>
+                ${weakTopics.length > 0 ? weakTopics.slice(0, 3).map((t, i) => `
+                    <div class="insight-item ranked">
+                        <span class="rank-badge danger">${i + 1}</span>
+                        <div class="insight-details">
+                            <span class="topic-name">${t.topic}</span>
+                            <span class="topic-subject-tag">${t.subject}</span>
+                        </div>
+                        <div class="insight-score-container">
+                            <span class="topic-score danger">${t.accuracy.toFixed(0)}%</span>
+                            <span class="topic-ratio">${t.correct}/${t.total}</span>
+                        </div>
+                    </div>
+                `).join('') : '<p class="no-data success-message">🎉 Great job! All topics above 50%</p>'}
+            </div>
+        </div>
+        
+        <div class="topic-full-breakdown">
+            <h4><span class="material-symbols-outlined">bar_chart</span> Complete Topic Breakdown</h4>
+            <div class="topic-table-container">
+                <table class="topic-table">
+                    <thead>
+                        <tr>
+                            <th>Topic</th>
+                            <th>Subject</th>
+                            <th>Performance</th>
+                            <th>Score</th>
+                            <th>Avg Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${sortedTopics.map(t => {
+                            const statusClass = t.accuracy >= 70 ? 'excellent' : t.accuracy >= 50 ? 'good' : 'poor';
+                            return `
+                                <tr class="${statusClass}">
+                                    <td class="topic-cell">${t.topic}</td>
+                                    <td class="subject-cell">${t.subject}</td>
+                                    <td class="performance-cell">
+                                        <div class="mini-performance-bar">
+                                            <div class="mini-bar-fill" style="width: ${t.accuracy}%; background: ${t.accuracy >= 70 ? 'var(--success-color)' : t.accuracy >= 50 ? 'var(--warning-color)' : 'var(--danger-color)'}"></div>
+                                        </div>
+                                    </td>
+                                    <td class="score-cell">
+                                        <span class="accuracy-badge ${statusClass}">${t.accuracy.toFixed(0)}%</span>
+                                        <span class="ratio">(${t.correct}/${t.total})</span>
+                                    </td>
+                                    <td class="time-cell">${t.avgTime.toFixed(1)}s</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
         </div>
     `;
 }
@@ -2713,30 +3675,201 @@ function renderAnalyticsDashboard() {
     `}).join('');
 }
 
-// Score Trend Graph
+// Score Trend Graph - Fixed to prevent duplicates
 function renderScoreTrendGraph(sortedHistory: TestAttempt[]) {
+    // Remove existing trend card if present
+    const existingTrendCard = document.querySelector('.score-trend-card');
+    if (existingTrendCard) {
+        existingTrendCard.remove();
+    }
+    
+    // Remove any existing additional analysis cards
+    const existingCards = document.querySelectorAll('.analytics-additional-card');
+    existingCards.forEach(card => card.remove());
+    
+    if (sortedHistory.length < 2) return; // Need at least 2 tests for trend
+    
+    // Calculate trend data
+    const recentTests = sortedHistory.slice(0, 10).reverse();
+    const avgScore = recentTests.reduce((sum, t) => sum + t.score, 0) / recentTests.length;
+    const maxScore = Math.max(...recentTests.map(t => t.score));
+    const minScore = Math.min(...recentTests.map(t => t.score));
+    
+    // Calculate improvement from first to last
+    const improvement = recentTests.length >= 2 
+        ? recentTests[recentTests.length - 1].score - recentTests[0].score 
+        : 0;
+    
+    // Calculate streak of passing tests
+    let passingStreak = 0;
+    for (let i = recentTests.length - 1; i >= 0; i--) {
+        if (recentTests[i].score >= 50) passingStreak++;
+        else break;
+    }
+    
     const trendContainer = document.createElement('div');
     trendContainer.className = 'report-card score-trend-card';
     trendContainer.innerHTML = `
-        <h3><span class="material-symbols-outlined">show_chart</span> Score Trend</h3>
-        <div class="score-trend-graph">
-            ${sortedHistory.slice(0, 10).reverse().map((attempt, i) => {
-                const height = Math.max(attempt.score, 5);
-                const barColor = attempt.score >= 60 ? 'var(--success-color)' : attempt.score >= 40 ? 'var(--warning-color)' : 'var(--danger-color)';
-                const date = new Date(attempt.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-                return `
-                    <div class="trend-bar-container" title="${attempt.testName}: ${attempt.score.toFixed(1)}%">
-                        <div class="trend-bar" style="height: ${height}%; background: ${barColor}"></div>
-                        <span class="trend-label">${date}</span>
-                    </div>
-                `;
-            }).join('')}
+        <div class="trend-header">
+            <h3><span class="material-symbols-outlined">show_chart</span> Performance Trend</h3>
+            <div class="trend-meta">
+                <span class="trend-indicator ${improvement >= 0 ? 'positive' : 'negative'}">
+                    <span class="material-symbols-outlined">${improvement >= 0 ? 'trending_up' : 'trending_down'}</span>
+                    ${improvement >= 0 ? '+' : ''}${improvement.toFixed(1)}%
+                </span>
+            </div>
         </div>
-        <p class="trend-caption">Last ${Math.min(sortedHistory.length, 10)} tests performance</p>
+        
+        <div class="trend-stats-row">
+            <div class="trend-stat">
+                <span class="trend-stat-value">${avgScore.toFixed(1)}%</span>
+                <span class="trend-stat-label">Average</span>
+            </div>
+            <div class="trend-stat">
+                <span class="trend-stat-value best">${maxScore.toFixed(1)}%</span>
+                <span class="trend-stat-label">Best</span>
+            </div>
+            <div class="trend-stat">
+                <span class="trend-stat-value">${minScore.toFixed(1)}%</span>
+                <span class="trend-stat-label">Lowest</span>
+            </div>
+            <div class="trend-stat">
+                <span class="trend-stat-value streak">${passingStreak}</span>
+                <span class="trend-stat-label">Pass Streak</span>
+            </div>
+        </div>
+        
+        <div class="score-trend-graph">
+            <div class="graph-y-axis">
+                <span>100%</span>
+                <span>50%</span>
+                <span>0%</span>
+            </div>
+            <div class="graph-content">
+                <div class="graph-grid-lines">
+                    <div class="grid-line" style="bottom: 100%"></div>
+                    <div class="grid-line pass-line" style="bottom: 50%"></div>
+                    <div class="grid-line" style="bottom: 0%"></div>
+                </div>
+                <div class="graph-bars">
+                    ${recentTests.map((attempt, i) => {
+                        const height = Math.max(attempt.score, 3);
+                        const barColor = attempt.score >= 60 ? 'var(--success-color)' : attempt.score >= 40 ? 'var(--warning-color)' : 'var(--danger-color)';
+                        const date = new Date(attempt.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        return `
+                            <div class="trend-bar-wrapper" title="${attempt.testName}: ${attempt.score.toFixed(1)}%">
+                                <div class="trend-bar-value">${attempt.score.toFixed(0)}%</div>
+                                <div class="trend-bar" style="height: ${height}%; background: ${barColor}"></div>
+                                <span class="trend-bar-label">${date}</span>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        </div>
+        
+        <div class="trend-insight">
+            <span class="material-symbols-outlined">${improvement >= 5 ? 'celebration' : improvement >= 0 ? 'thumb_up' : 'psychology'}</span>
+            <p>${improvement >= 5 
+                ? 'Excellent progress! Your scores are consistently improving.' 
+                : improvement >= 0 
+                ? 'Good job! Keep practicing to continue improving.' 
+                : 'Your recent scores have dropped. Focus on your weak areas to improve.'}</p>
+        </div>
     `;
     
     // Insert after stats grid
-    analyticsStatsGrid.parentNode?.insertBefore(trendContainer, analyticsStatsGrid.nextSibling);
+    const statsGrid = document.getElementById('analytics-stats-grid');
+    if (statsGrid && statsGrid.parentNode) {
+        statsGrid.parentNode.insertBefore(trendContainer, statsGrid.nextSibling);
+    }
+    
+    // Add weekly activity heatmap
+    renderWeeklyActivity(sortedHistory);
+}
+
+// Weekly Activity Heatmap
+function renderWeeklyActivity(sortedHistory: TestAttempt[]) {
+    // Get tests from last 4 weeks
+    const fourWeeksAgo = Date.now() - (28 * 24 * 60 * 60 * 1000);
+    const recentTests = sortedHistory.filter(t => new Date(t.completedAt).getTime() > fourWeeksAgo);
+    
+    // Group by day
+    const dayActivity: { [key: string]: { count: number, avgScore: number } } = {};
+    
+    for (let i = 0; i < 28; i++) {
+        const date = new Date(Date.now() - (i * 24 * 60 * 60 * 1000));
+        const dateKey = date.toISOString().split('T')[0];
+        dayActivity[dateKey] = { count: 0, avgScore: 0 };
+    }
+    
+    recentTests.forEach(test => {
+        const dateKey = new Date(test.completedAt).toISOString().split('T')[0];
+        if (dayActivity[dateKey]) {
+            dayActivity[dateKey].count++;
+            dayActivity[dateKey].avgScore = (dayActivity[dateKey].avgScore * (dayActivity[dateKey].count - 1) + test.score) / dayActivity[dateKey].count;
+        }
+    });
+    
+    const days = Object.entries(dayActivity).sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime());
+    const maxCount = Math.max(...days.map(d => d[1].count), 1);
+    
+    // Calculate weekly totals
+    const thisWeekTests = recentTests.filter(t => {
+        const testDate = new Date(t.completedAt);
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        return testDate > weekAgo;
+    }).length;
+    
+    const activityCard = document.createElement('div');
+    activityCard.className = 'report-card analytics-additional-card activity-card';
+    activityCard.innerHTML = `
+        <h3><span class="material-symbols-outlined">calendar_month</span> Study Activity (Last 4 Weeks)</h3>
+        <div class="activity-summary">
+            <div class="activity-stat">
+                <span class="activity-value">${recentTests.length}</span>
+                <span class="activity-label">Tests in 4 Weeks</span>
+            </div>
+            <div class="activity-stat">
+                <span class="activity-value">${thisWeekTests}</span>
+                <span class="activity-label">This Week</span>
+            </div>
+            <div class="activity-stat">
+                <span class="activity-value">${(recentTests.length / 4).toFixed(1)}</span>
+                <span class="activity-label">Avg per Week</span>
+            </div>
+        </div>
+        <div class="activity-heatmap">
+            <div class="heatmap-labels">
+                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+            </div>
+            <div class="heatmap-grid">
+                ${days.map(([date, data]) => {
+                    const intensity = data.count > 0 ? Math.min(data.count / maxCount, 1) : 0;
+                    const bgColor = data.count === 0 
+                        ? 'rgba(255,255,255,0.05)' 
+                        : `rgba(99, 102, 241, ${0.2 + intensity * 0.8})`;
+                    const dayName = new Date(date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+                    return `<div class="heatmap-cell" style="background: ${bgColor}" title="${dayName}: ${data.count} test(s)${data.count > 0 ? ` (Avg: ${data.avgScore.toFixed(0)}%)` : ''}"></div>`;
+                }).join('')}
+            </div>
+            <div class="heatmap-legend">
+                <span>Less</span>
+                <div class="legend-scale">
+                    <div style="background: rgba(255,255,255,0.05)"></div>
+                    <div style="background: rgba(99, 102, 241, 0.3)"></div>
+                    <div style="background: rgba(99, 102, 241, 0.6)"></div>
+                    <div style="background: rgba(99, 102, 241, 0.9)"></div>
+                </div>
+                <span>More</span>
+            </div>
+        </div>
+    `;
+    
+    const subjectCard = document.querySelector('.report-card:has(#subject-mastery-container)') || document.querySelector('#subject-mastery-container')?.parentNode;
+    if (subjectCard) {
+        subjectCard.parentNode?.insertBefore(activityCard, subjectCard);
+    }
 }
 
 // Add Event delegation for Subject Cards
