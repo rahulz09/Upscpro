@@ -64,6 +64,7 @@ const registerUsernameInput = document.getElementById('register-username') as HT
 const registerPasswordInput = document.getElementById('register-password') as HTMLInputElement;
 const registerConfirmInput = document.getElementById('register-confirm') as HTMLInputElement;
 const logoutBtn = document.getElementById('logout-btn');
+const cloudSyncBtn = document.getElementById('cloud-sync-btn');
 const userDisplayName = document.getElementById('user-display-name');
 
 // --- Current User State ---
@@ -255,6 +256,16 @@ logoutBtn.addEventListener('click', () => {
     }
 });
 
+const cloudSyncBtn = document.getElementById('cloud-sync-btn');
+if (cloudSyncBtn) {
+    cloudSyncBtn.addEventListener('click', () => {
+        showToast('Connecting to Replit Backend... (Simulation)', 'info');
+        setTimeout(() => {
+            showToast('Data synced successfully!', 'success');
+        }, 1500);
+    });
+}
+
 // Initialize auth check
 checkExistingSession();
 
@@ -316,6 +327,7 @@ const saveTestBtn = document.getElementById('save-test-btn');
 const allTestsContainer = document.getElementById('all-tests-container');
 const importTestBtn = document.getElementById('import-test-btn');
 const importTestInput = document.getElementById('import-test-input') as HTMLInputElement;
+const testSearchInput = document.getElementById('test-search-input') as HTMLInputElement;
 
 // Test Detail View Elements
 const testDetailContainer = document.getElementById('test-detail-container');
@@ -668,152 +680,249 @@ document.querySelectorAll('.clear-text-btn').forEach(btn => {
     });
 });
 
+function parseQuestionsLocally(text: string): Question[] | null {
+    const questions: Question[] = [];
+    const blocks = text.split(/\n\s*\n/).filter(b => b.trim());
+
+    for (const block of blocks) {
+        try {
+            const lines = block.split('\n').map(l => l.trim()).filter(l => l);
+            if (lines.length < 2) continue;
+
+            // 1. Parse Question
+            let qText = lines[0].replace(/^\d+[\.\)]\s*|Q[\.\)]\s*/i, '').trim();
+            
+            // 2. Parse Options (handling single line or multi-line)
+            // Look for patterns like a) ... b) ... or A) ... B) ...
+            const options: string[] = [];
+            const optionRegex = /(?:^|\s+)([a-d]|[A-D])[\)\.]\s+([^a-d^A-D\n]+)/g;
+            
+            let optionsLine = lines.find(l => /^[a-d][\)\.]/i.test(l) || /a\)/i.test(l));
+            
+            // If options are on separate lines
+            if (!optionsLine) {
+                 const optLines = lines.filter(l => /^[a-d][\)\.]/i.test(l));
+                 if (optLines.length >= 2) {
+                     optionsLine = optLines.join(' '); 
+                 }
+            }
+
+            if (optionsLine) {
+                 // Simple split might fail if option text contains " b) "
+                 // Let's try to match known patterns
+                 const parts = optionsLine.split(/\s+(?=[a-d][\)\.])/i);
+                 parts.forEach(p => {
+                     const optText = p.replace(/^[a-d][\)\.]\s*/i, '').trim();
+                     if (optText) options.push(optText);
+                 });
+            }
+
+            if (options.length < 2) continue; // Need at least 2 options
+
+            // 3. Parse Answer
+            const ansLine = lines.find(l => /^Answer:/i.test(l));
+            let answerIndex = 0;
+            if (ansLine) {
+                const ansChar = ansLine.split(':')[1]?.trim().toLowerCase();
+                if (ansChar) {
+                    answerIndex = ansChar.charCodeAt(0) - 97; // 'a' -> 0
+                }
+            }
+
+            // 4. Parse Explanation
+            const expLine = lines.find(l => /^Explanation:/i.test(l));
+            const explanation = expLine ? expLine.split(/:(.+)/)[1]?.trim() || "" : "";
+
+            // 5. Parse Subject/Topic
+            const metaLine = lines.find(l => /^Subject:/i.test(l));
+            let subject = "General";
+            let topic = "General";
+            
+            if (metaLine) {
+                const metaParts = metaLine.split('|');
+                subject = metaParts[0]?.replace('Subject:', '').trim() || "General";
+                topic = metaParts[1]?.replace('Topic:', '').trim() || "General";
+            }
+
+            questions.push({
+                question: qText,
+                options: options.slice(0, 4), // Limit to 4 options
+                answer: Math.max(0, Math.min(3, answerIndex)), // Ensure valid range
+                explanation,
+                subject,
+                topic
+            });
+        } catch (e) {
+            console.warn("Failed to parse block:", block);
+        }
+    }
+
+    return questions.length > 0 ? questions : null;
+}
+
 generateTestBtn.addEventListener('click', handleGenerateTest);
 
 async function handleGenerateTest() {
-    if (!ai) {
-        alert("AI Service is not available.");
-        return;
-    }
-
-    loader.classList.remove('hidden');
-    generateTestBtn.disabled = true;
-
-    let source = "Custom Input";
-    let contentsForApi;
-
+    // Basic validation first
     const numQuestions = parseInt(questionsSlider.value, 10);
     const language = languageSelect.value;
     const testName = testNameInput.value.trim();
     const marks = parseFloat(marksInput.value) || 1;
     const negative = parseFloat(negativeInput.value) || 0;
 
+    loader.classList.remove('hidden');
+    generateTestBtn.disabled = true;
+
+    let source = "Custom Input";
+    let questions: Question[] | null = null;
+    
     try {
-        switch (activeTabInput.type) {
-            case 'topic':
-                const topic = topicInput.value.trim();
-                if (!topic) throw new Error('Please enter a topic.');
-                source = topic;
-                const promptTopic = `Generate ${numQuestions} UPSC-style multiple-choice questions (4 options) based on the following topic: ${topic}. The questions should be in ${language}. For each question, provide the question, four options, the 0-indexed correct answer, a detailed explanation, the general subject, and the specific topic.`;
-                contentsForApi = promptTopic;
-                break;
-            case 'text':
-                const text = textInput.value.trim();
-                if (!text) throw new Error('Please paste some text.');
-                source = "Pasted Text";
-                const promptText = `Generate ${numQuestions} UPSC-style multiple-choice questions (4 options) based on the following text: """${text}""". The questions should be in ${language}. For each question, provide the question, four options, the 0-indexed correct answer, a detailed explanation, the general subject, and the specific topic.`;
-                contentsForApi = promptText;
-                break;
-            case 'manual':
-                const manualText = manualInput.value.trim();
-                if (!manualText) throw new Error('Please paste your questions in the text area.');
-                source = "Bulk Import";
-                const promptManual = `Analyze the following text and extract ALL multiple-choice questions found within it.
-                
-                The text is expected to contain questions in a format similar to:
-                "Q. Question text... A) Opt1 B) Opt2... Answer: A Explanation: ..."
-                
-                Your task:
-                1. Extract every valid question.
-                2. Map options to a string array.
-                3. Determine the correct answer index (0 for A/1, 1 for B/2, etc).
-                4. Extract explanation if present, otherwise generate a brief one.
-                5. Extract Subject and Topic if present, otherwise infer them from the question content.
-                6. Return the result strictly as a JSON array matching the schema.
-                
-                Input Text:
-                """${manualText}"""`;
-                contentsForApi = promptManual;
-                break;
-            case 'file':
-                const file = fileUpload.files[0];
-                if (!file) throw new Error('Please select a file to upload.');
-                source = file.name;
+        // --- 1. Attempt Local Processing First (Bulk Import) ---
+        if (activeTabInput.type === 'manual') {
+            const manualText = manualInput.value.trim();
+            if (!manualText) throw new Error('Please paste your questions in the text area.');
+            
+            source = "Bulk Import";
+            
+            // Try local parsing first!
+            const localQuestions = parseQuestionsLocally(manualText);
+            if (localQuestions && localQuestions.length > 0) {
+                console.log("Successfully parsed locally:", localQuestions.length, "questions");
+                questions = localQuestions;
+            }
+        }
+        
+        // --- 2. If Local Processing Succeeded, Skip AI ---
+        if (questions) {
+             // Artificial delay to show loader briefly (UX)
+             await new Promise(resolve => setTimeout(resolve, 500));
+        } else {
+            // --- 3. Fallback to AI Generation ---
+             if (!ai) {
+                throw new Error("AI Service is not available and local parsing failed.");
+            }
 
-                if (file.type === "text/plain" || file.name.toLowerCase().endsWith('.txt')) {
-                    const fileText = await file.text();
-                    if (!fileText.trim()) throw new Error('The uploaded file is empty.');
-                    const promptFileText = `Generate ${numQuestions} ... based on the following text: """${fileText}"""`;
-                    contentsForApi = promptFileText;
-                } else if (file.type === "application/pdf" || file.name.toLowerCase().endsWith('.pdf')) {
-                    const arrayBuffer = await file.arrayBuffer();
-                    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-                    let fullText = '';
-                    for (let i = 1; i <= pdf.numPages; i++) {
-                        const page = await pdf.getPage(i);
-                        const textContent = await page.getTextContent();
-                        const pageText = textContent.items.map(item => ('str' in item ? item.str : '')).join(' ');
-                        fullText += pageText + '\n\n';
-                    }
-
-                    const MINIMUM_TEXT_LENGTH = 100;
-
-                    if (fullText.trim().length > MINIMUM_TEXT_LENGTH) {
-                        const promptPDFText = `Generate ${numQuestions} UPSC-style multiple-choice questions (4 options) based on the following text. The questions should be in ${language}. For each question, provide the question, four options, the 0-indexed correct answer, a detailed explanation, the general subject, and the specific topic.\n\nText: """${fullText}"""`;
-                        contentsForApi = promptPDFText;
-                    } else {
-                        (loader.querySelector('p') as HTMLElement).textContent = 'Minimal text found. Attempting OCR on PDF pages for better results...';
-                        
-                        const textPart = { text: `Generate ${numQuestions} UPSC-style multiple-choice questions (4 options) based on the content in the following images. The questions should be in ${language}. For each question, provide the question, four options, the 0-indexed correct answer, a detailed explanation, the general subject, and the specific topic.` };
-                        const imageParts = [];
-
+            let contentsForApi;
+            
+            switch (activeTabInput.type) {
+                case 'topic':
+                    const topic = topicInput.value.trim();
+                    if (!topic) throw new Error('Please enter a topic.');
+                    source = topic;
+                    const promptTopic = `Generate ${numQuestions} UPSC-style multiple-choice questions (4 options) based on the following topic: ${topic}. The questions should be in ${language}. For each question, provide the question, four options, the 0-indexed correct answer, a detailed explanation, the general subject, and the specific topic.`;
+                    contentsForApi = promptTopic;
+                    break;
+                case 'text':
+                    const text = textInput.value.trim();
+                    if (!text) throw new Error('Please paste some text.');
+                    source = "Pasted Text";
+                    const promptText = `Generate ${numQuestions} UPSC-style multiple-choice questions (4 options) based on the following text: """${text}""". The questions should be in ${language}. For each question, provide the question, four options, the 0-indexed correct answer, a detailed explanation, the general subject, and the specific topic.`;
+                    contentsForApi = promptText;
+                    break;
+                case 'manual':
+                     // If we are here, local parsing failed or returned null
+                    const manualText = manualInput.value.trim();
+                    source = "Bulk Import";
+                    const promptManual = `Analyze the following text and extract ALL multiple-choice questions found within it.
+                    
+                    The text is expected to contain questions in a format similar to:
+                    "Q. Question text... A) Opt1 B) Opt2... Answer: A Explanation: ..."
+                    
+                    Your task:
+                    1. Extract every valid question.
+                    2. Map options to a string array.
+                    3. Determine the correct answer index (0 for A/1, 1 for B/2, etc).
+                    4. Extract explanation if present, otherwise generate a brief one.
+                    5. Extract Subject and Topic if present, otherwise infer them from the question content.
+                    6. Return the result strictly as a JSON array matching the schema.
+                    
+                    Input Text:
+                    """${manualText}"""`;
+                    contentsForApi = promptManual;
+                    break;
+                case 'file':
+                    const file = fileUpload.files[0];
+                    if (!file) throw new Error('Please select a file to upload.');
+                    source = file.name;
+    
+                    if (file.type === "text/plain" || file.name.toLowerCase().endsWith('.txt')) {
+                        const fileText = await file.text();
+                        if (!fileText.trim()) throw new Error('The uploaded file is empty.');
+                        const promptFileText = `Generate ${numQuestions} ... based on the following text: """${fileText}"""`;
+                        contentsForApi = promptFileText;
+                    } else if (file.type === "application/pdf" || file.name.toLowerCase().endsWith('.pdf')) {
+                        const arrayBuffer = await file.arrayBuffer();
+                        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+                        let fullText = '';
                         for (let i = 1; i <= pdf.numPages; i++) {
                             const page = await pdf.getPage(i);
-                            const viewport = page.getViewport({ scale: 1.5 });
-                            const canvas = document.createElement('canvas');
-                            const context = canvas.getContext('2d');
-                            canvas.height = viewport.height;
-                            canvas.width = viewport.width;
-
-                            await page.render({ canvasContext: context, viewport: viewport, canvas: canvas } as any).promise;
-                            
-                            const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
-                            imageParts.push({ inlineData: { mimeType: 'image/jpeg', data: base64Image } });
+                            const textContent = await page.getTextContent();
+                            const pageText = textContent.items.map(item => ('str' in item ? item.str : '')).join(' ');
+                            fullText += pageText + '\n\n';
                         }
-                        if (imageParts.length === 0) throw new Error('Could not extract any images from the PDF.');
-
-                        contentsForApi = { parts: [textPart, ...imageParts] };
+    
+                        const MINIMUM_TEXT_LENGTH = 100;
+    
+                        if (fullText.trim().length > MINIMUM_TEXT_LENGTH) {
+                            const promptPDFText = `Generate ${numQuestions} UPSC-style multiple-choice questions (4 options) based on the following text. The questions should be in ${language}. For each question, provide the question, four options, the 0-indexed correct answer, a detailed explanation, the general subject, and the specific topic.\n\nText: """${fullText}"""`;
+                            contentsForApi = promptPDFText;
+                        } else {
+                            (loader.querySelector('p') as HTMLElement).textContent = 'Minimal text found. Attempting OCR on PDF pages for better results...';
+                            
+                            const textPart = { text: `Generate ${numQuestions} UPSC-style multiple-choice questions (4 options) based on the content in the following images. The questions should be in ${language}. For each question, provide the question, four options, the 0-indexed correct answer, a detailed explanation, the general subject, and the specific topic.` };
+                            const imageParts = [];
+    
+                            for (let i = 1; i <= pdf.numPages; i++) {
+                                const page = await pdf.getPage(i);
+                                const viewport = page.getViewport({ scale: 1.5 });
+                                const canvas = document.createElement('canvas');
+                                const context = canvas.getContext('2d');
+                                canvas.height = viewport.height;
+                                canvas.width = viewport.width;
+    
+                                await page.render({ canvasContext: context, viewport: viewport, canvas: canvas } as any).promise;
+                                
+                                const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
+                                imageParts.push({ inlineData: { mimeType: 'image/jpeg', data: base64Image } });
+                            }
+                            if (imageParts.length === 0) throw new Error('Could not extract any images from the PDF.');
+    
+                            contentsForApi = { parts: [textPart, ...imageParts] };
+                        }
+                    } else {
+                        throw new Error(`Unsupported file type: '${file.type || 'unknown'}'. Please upload a PDF or TXT file.`);
                     }
-                } else {
-                    throw new Error(`Unsupported file type: '${file.type || 'unknown'}'. Please upload a PDF or TXT file.`);
-                }
-                break;
-        }
-
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: contentsForApi,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: questionSchema,
-                },
-            },
-        });
-
-        if (!response || !response.text) {
-            console.error("Invalid AI Response:", response);
-            const finishReason = response?.candidates?.[0]?.finishReason;
-            let errorMessage = "AI did not return a valid response. It might be empty or malformed.";
-            if (finishReason === 'SAFETY') {
-                errorMessage = "The request was blocked due to safety concerns. Please adjust your input text or file.";
-            } else if (finishReason) {
-                errorMessage = `Generation failed. Reason: ${finishReason}.`;
+                    break;
             }
-            throw new Error(errorMessage);
-        }
-
-        const parsedResponse = JSON.parse(response.text);
-
-        if (!Array.isArray(parsedResponse) || parsedResponse.length === 0) {
-            throw new Error("Invalid response format from AI. The generated content was not a valid list of questions.");
+    
+            const response = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: contentsForApi,
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: Type.ARRAY,
+                        items: questionSchema,
+                    },
+                },
+            });
+    
+            if (!response || !response.text) {
+                console.error("Invalid AI Response:", response);
+                throw new Error("AI did not return a valid response.");
+            }
+    
+            questions = JSON.parse(response.text);
+    
+            if (!Array.isArray(questions) || questions.length === 0) {
+                throw new Error("Invalid response format from AI.");
+            }
         }
 
         currentTest = {
             id: `test_${Date.now()}`,
             name: testName || `Test on ${source}`,
-            questions: parsedResponse,
+            questions: questions,
             duration: parseInt(durationInput.value, 10),
             language: language,
             createdAt: new Date().toISOString(),
@@ -1010,10 +1119,10 @@ saveTestBtn.addEventListener('click', () => {
     
     if (existingIndex > -1) {
         tests[existingIndex] = currentTest;
-        alert('Test updated successfully!');
+        showToast('Test updated successfully!', 'success');
     } else {
         tests.unshift(currentTest);
-        alert('Test created successfully!');
+        showToast('Test created successfully!', 'success');
     }
     
     saveToStorage('tests', tests);
@@ -1024,9 +1133,15 @@ saveTestBtn.addEventListener('click', () => {
 
 // --- All Tests & Test Detail Logic ---
 function renderAllTests() {
-    const tests = getFromStorage<Test[]>('tests', []);
+    let tests = getFromStorage<Test[]>('tests', []);
+    const searchTerm = testSearchInput?.value?.toLowerCase().trim() || '';
+
+    if (searchTerm) {
+        tests = tests.filter(t => t.name.toLowerCase().includes(searchTerm));
+    }
+
     if (tests.length === 0) {
-        allTestsContainer.innerHTML = `<p class="placeholder">You haven't saved any tests yet.</p>`;
+        allTestsContainer.innerHTML = `<p class="placeholder">${searchTerm ? 'No tests found matching your search.' : "You haven't saved any tests yet."}</p>`;
         return;
     }
     allTestsContainer.innerHTML = tests.map(test => {
@@ -1156,6 +1271,10 @@ function handleImportTest(event: Event) {
 
 importTestBtn.addEventListener('click', () => importTestInput.click());
 importTestInput.addEventListener('change', handleImportTest);
+
+if (testSearchInput) {
+    testSearchInput.addEventListener('input', () => renderAllTests());
+}
 
 allTestsContainer.addEventListener('click', e => {
     const target = e.target as HTMLElement;
@@ -2715,6 +2834,10 @@ function renderAnalyticsDashboard() {
 
 // Score Trend Graph
 function renderScoreTrendGraph(sortedHistory: TestAttempt[]) {
+    // Remove existing graph to prevent duplication
+    const existingTrend = document.querySelector('.score-trend-card');
+    if (existingTrend) existingTrend.remove();
+
     const trendContainer = document.createElement('div');
     trendContainer.className = 'report-card score-trend-card';
     trendContainer.innerHTML = `

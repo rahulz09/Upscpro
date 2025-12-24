@@ -120,6 +120,10 @@
           <span class="material-symbols-outlined">account_circle</span>
           <span id="user-display-name">User</span>
         </div>
+        <button id="cloud-sync-btn" class="logout-btn" title="Sync to Cloud" style="margin-right: 0.5rem;">
+          <span class="material-symbols-outlined">cloud_sync</span>
+          <span>Sync</span>
+        </button>
         <button id="logout-btn" class="logout-btn" title="Logout">
           <span class="material-symbols-outlined">logout</span>
           <span>Logout</span>
@@ -279,9 +283,13 @@ Subject: Science | Topic: Solar System
     </button>
     <div class="view-header">
       <h2>All Saved Tests</h2>
+      <div class="search-bar-container">
+          <span class="material-symbols-outlined search-icon">search</span>
+          <input type="text" id="test-search-input" placeholder="Search tests..." class="search-input">
+      </div>
       <input type="file" id="import-test-input" class="hidden" accept=".json,application/json">
       <button id="import-test-btn" class="action-btn add-btn">
-          <span class="material-symbols-outlined">upload_file</span> Import Single Test
+          <span class="material-symbols-outlined">upload_file</span> Import
       </button>
     </div>
     <div id="all-tests-container" class="all-tests-grid">
