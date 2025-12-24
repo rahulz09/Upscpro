@@ -409,6 +409,27 @@ Subject: Science | Topic: Solar System
       <span class="material-symbols-outlined">arrow_back</span> Back
     </button>
     <h2>Results History</h2>
+    
+    <!-- Search and Filter Bar for Results -->
+    <div class="results-filter-bar">
+      <div class="search-box">
+        <span class="material-symbols-outlined">search</span>
+        <input type="text" id="results-search-input" placeholder="Search results by test name...">
+      </div>
+      <div class="filter-controls">
+        <select id="results-sort-select">
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+          <option value="score-high">Highest Score</option>
+          <option value="score-low">Lowest Score</option>
+        </select>
+        <button id="bulk-delete-results-btn" class="action-btn danger-btn" style="display: none;">
+          <span class="material-symbols-outlined">delete_sweep</span>
+          <span>Delete Selected</span>
+        </button>
+      </div>
+    </div>
+    
     <div id="performance-container">
       <p class="placeholder">You haven't completed any tests yet.</p>
     </div>
@@ -480,19 +501,15 @@ Subject: Science | Topic: Solar System
               Quick Start Guide
             </label>
             <div class="info-box">
-              <p><strong>For Replit Users:</strong></p>
+              <p><strong>How to get your API Key:</strong></p>
               <ol>
-                <li>Get your free API key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></li>
-                <li>Click the "Secrets" tab in Replit sidebar</li>
-                <li>Add: Key = <code>API_KEY</code>, Value = <code>your-api-key</code></li>
-                <li>Reload the page</li>
+                <li>Visit <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></li>
+                <li>Sign in with your Google account</li>
+                <li>Click "Create API Key" button</li>
+                <li>Copy your API key and paste it above</li>
+                <li>Click "Save Settings"</li>
               </ol>
-              <p><strong>For Local Development:</strong></p>
-              <ol>
-                <li>Create a <code>.env</code> file in the project root</li>
-                <li>Add: <code>API_KEY=your-api-key-here</code></li>
-                <li>Restart the dev server</li>
-              </ol>
+              <p style="margin-top: 0.75rem; color: var(--success-color);">✨ That's it! You're ready to generate tests using AI.</p>
             </div>
           </div>
 
@@ -512,11 +529,23 @@ Subject: Science | Topic: Solar System
             </button>
             <button id="import-data-btn" class="action-btn">
               <span class="material-symbols-outlined">upload</span>
-              Import Data
+              Import Backup
             </button>
-            <button id="clear-data-btn" class="action-btn" style="background: var(--danger-color);">
+          </div>
+          
+          <p class="settings-description" style="margin-top: 1.5rem;">Danger Zone - Irreversible Actions</p>
+          <div class="settings-actions-grid danger-zone">
+            <button id="clear-results-btn" class="action-btn danger-btn">
+              <span class="material-symbols-outlined">history</span>
+              Clear Results Only
+            </button>
+            <button id="clear-tests-btn" class="action-btn danger-btn">
+              <span class="material-symbols-outlined">quiz</span>
+              Clear Tests Only
+            </button>
+            <button id="clear-data-btn" class="action-btn danger-btn-full">
               <span class="material-symbols-outlined">delete_forever</span>
-              Clear All Data
+              Clear Everything
             </button>
           </div>
         </div>
@@ -526,7 +555,7 @@ Subject: Science | Topic: Solar System
           <div class="info-grid">
             <div class="info-item">
               <span class="info-label">Version:</span>
-              <span class="info-value">2.0.0</span>
+              <span class="info-value">2.1.0</span>
             </div>
             <div class="info-item">
               <span class="info-label">Storage Used:</span>
@@ -551,9 +580,19 @@ Subject: Science | Topic: Solar System
       <button id="back-to-performance-list" class="back-button" aria-label="Go back">
         <span class="material-symbols-outlined">arrow_back</span> Back
       </button>
-      <button id="download-report-btn" class="action-btn save-btn" aria-label="Download this report">
-        <span class="material-symbols-outlined">download</span> Download Report
-      </button>
+      <div class="report-action-buttons">
+        <button id="retry-from-report-btn" class="action-btn retry-btn" aria-label="Retry this test" title="Retry Test">
+          <span class="material-symbols-outlined">replay</span>
+          <span class="btn-text">Retry</span>
+        </button>
+        <button id="download-report-btn" class="action-btn save-btn" aria-label="Download this report" title="Download Report">
+          <span class="material-symbols-outlined">download</span>
+          <span class="btn-text">Download</span>
+        </button>
+        <button id="delete-from-report-btn" class="action-btn danger-outline-btn" aria-label="Delete this result" title="Delete Result">
+          <span class="material-symbols-outlined">delete</span>
+        </button>
+      </div>
     </div>
 
     <h2 id="performance-report-title">Test Result</h2>

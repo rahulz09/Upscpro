@@ -362,6 +362,8 @@ const saveSettingsBtn = document.getElementById('save-settings-btn');
 const exportDataBtn = document.getElementById('export-data-btn');
 const importDataBtn = document.getElementById('import-data-btn');
 const clearDataBtn = document.getElementById('clear-data-btn');
+const clearResultsBtn = document.getElementById('clear-results-btn');
+const clearTestsBtn = document.getElementById('clear-tests-btn');
 
 // --- Test State ---
 let currentTest: Test | null = null;
@@ -563,21 +565,30 @@ analyticsModal.addEventListener('click', (e) => {
 });
 
 // --- Settings Modal Handlers ---
+function updateSettingsInfo() {
+    const tests = getFromStorage<Test[]>('tests', []);
+    const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+    
+    const totalTestsEl = document.getElementById('total-tests');
+    const totalAttemptsEl = document.getElementById('total-attempts');
+    const storageUsedEl = document.getElementById('storage-used');
+    
+    if (totalTestsEl) totalTestsEl.textContent = tests.length.toString();
+    if (totalAttemptsEl) totalAttemptsEl.textContent = history.length.toString();
+    
+    // Calculate storage
+    const storageStr = JSON.stringify({ tests, performanceHistory: history });
+    const storageSizeKB = (new Blob([storageStr]).size / 1024).toFixed(2);
+    if (storageUsedEl) storageUsedEl.textContent = `${storageSizeKB} KB`;
+}
+
 settingsBtn.addEventListener('click', () => {
     // Load current settings
     const savedApiKey = localStorage.getItem('userApiKey') || '';
     apiKeyInput.value = savedApiKey;
     
     // Update stats
-    const tests = getFromStorage<Test[]>('tests', []);
-    const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
-    document.getElementById('total-tests').textContent = tests.length.toString();
-    document.getElementById('total-attempts').textContent = history.length.toString();
-    
-    // Calculate storage
-    const storageStr = JSON.stringify({ tests, performanceHistory: history });
-    const storageSizeKB = (new Blob([storageStr]).size / 1024).toFixed(2);
-    document.getElementById('storage-used').textContent = `${storageSizeKB} KB`;
+    updateSettingsInfo();
     
     settingsModal.classList.remove('hidden');
 });
@@ -633,7 +644,7 @@ exportDataBtn.addEventListener('click', () => {
     const users = getUsers();
     
     const backupData = {
-        version: '2.0.0',
+        version: '2.1.0',
         exportDate: new Date().toISOString(),
         tests,
         performanceHistory: history,
@@ -674,6 +685,43 @@ clearDataBtn.addEventListener('click', () => {
             if (!performanceView.classList.contains('hidden')) renderPerformanceHistory();
             if (!analyticsView.classList.contains('hidden')) renderAnalyticsDashboard();
         }
+    }
+});
+
+// Clear Results Only
+clearResultsBtn?.addEventListener('click', () => {
+    const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+    if (history.length === 0) {
+        alert('No results to clear.');
+        return;
+    }
+    
+    if (confirm(`⚠️ This will delete all ${history.length} test result(s) from your history.\n\nYour saved tests will NOT be affected.\n\nContinue?`)) {
+        localStorage.removeItem('performanceHistory');
+        alert(`✅ ${history.length} result(s) cleared successfully.`);
+        
+        // Refresh views
+        if (!performanceView.classList.contains('hidden')) renderPerformanceHistory();
+        if (!analyticsView.classList.contains('hidden')) renderAnalyticsDashboard();
+        updateSettingsInfo();
+    }
+});
+
+// Clear Tests Only
+clearTestsBtn?.addEventListener('click', () => {
+    const tests = getFromStorage<Test[]>('tests', []);
+    if (tests.length === 0) {
+        alert('No tests to clear.');
+        return;
+    }
+    
+    if (confirm(`⚠️ This will delete all ${tests.length} saved test(s).\n\nYour result history will NOT be affected.\n\nContinue?`)) {
+        localStorage.removeItem('tests');
+        alert(`✅ ${tests.length} test(s) cleared successfully.`);
+        
+        // Refresh views
+        if (!allTestsView.classList.contains('hidden')) renderAllTests();
+        updateSettingsInfo();
     }
 });
 
@@ -1897,12 +1945,68 @@ function stopTimer() {
 }
 
 // --- Performance Logic ---
+let currentResultsFilter = { search: '', sort: 'newest' };
+
+// Results search/filter elements
+const resultsSearchInput = document.getElementById('results-search-input') as HTMLInputElement;
+const resultsSortSelect = document.getElementById('results-sort-select') as HTMLSelectElement;
+const bulkDeleteResultsBtn = document.getElementById('bulk-delete-results-btn');
+
+// Search results event
+resultsSearchInput?.addEventListener('input', (e) => {
+    currentResultsFilter.search = (e.target as HTMLInputElement).value.toLowerCase();
+    renderPerformanceHistory();
+});
+
+// Sort results event
+resultsSortSelect?.addEventListener('change', (e) => {
+    currentResultsFilter.sort = (e.target as HTMLSelectElement).value;
+    renderPerformanceHistory();
+});
+
 function renderPerformanceHistory() {
-    const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+    let history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+    
     if (history.length === 0) {
         performanceContainer.innerHTML = `<p class="placeholder">You haven't completed any tests yet.</p>`;
         return;
     }
+    
+    // Apply search filter
+    if (currentResultsFilter.search) {
+        history = history.filter(attempt => 
+            attempt.testName.toLowerCase().includes(currentResultsFilter.search)
+        );
+    }
+    
+    // Apply sorting
+    const sortedHistory = [...history];
+    switch (currentResultsFilter.sort) {
+        case 'oldest':
+            sortedHistory.sort((a, b) => new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime());
+            break;
+        case 'score-high':
+            sortedHistory.sort((a, b) => b.score - a.score);
+            break;
+        case 'score-low':
+            sortedHistory.sort((a, b) => a.score - b.score);
+            break;
+        case 'newest':
+        default:
+            sortedHistory.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+            break;
+    }
+    
+    // Use sortedHistory for display but keep original indices
+    history = sortedHistory;
+    
+    if (history.length === 0) {
+        performanceContainer.innerHTML = `<p class="placeholder">No results match your search.</p>`;
+        return;
+    }
+    
+    // Get original history for index mapping
+    const originalHistory = getFromStorage<TestAttempt[]>('performanceHistory', []);
 
     // Calculate overall stats
     const totalTests = history.length;
@@ -1960,7 +2064,12 @@ function renderPerformanceHistory() {
         </div>
     `;
 
-    const historyCards = history.map((attempt, index) => {
+    const historyCards = history.map((attempt) => {
+        // Find original index for proper deletion
+        const originalIndex = originalHistory.findIndex(h => 
+            h.completedAt === attempt.completedAt && h.testName === attempt.testName
+        );
+        
         const dateObj = new Date(attempt.completedAt);
         const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
         const time = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
@@ -1970,7 +2079,7 @@ function renderPerformanceHistory() {
             ((attempt.correctAnswers / (attempt.correctAnswers + attempt.incorrectAnswers)) * 100 || 0) : 0;
 
         return `
-        <div class="history-card enhanced" data-attempt-index="${index}">
+        <div class="history-card enhanced" data-attempt-index="${originalIndex}">
             <div class="history-card-header">
                 <div class="history-info">
                     <h3>${attempt.testName}</h3>
@@ -2035,7 +2144,14 @@ function renderPerformanceHistory() {
             <div class="history-card-footer">
                 <button class="view-report-btn">
                     <span class="material-symbols-outlined">analytics</span>
-                    <span>View Detailed Analysis</span>
+                    <span>Analysis</span>
+                </button>
+                <button class="retry-test-btn" data-index="${originalIndex}" title="Retry this test">
+                    <span class="material-symbols-outlined">replay</span>
+                    <span>Retry</span>
+                </button>
+                <button class="delete-result-btn" data-index="${originalIndex}" title="Delete this result">
+                    <span class="material-symbols-outlined">delete</span>
                 </button>
             </div>
         </div>
@@ -2046,17 +2162,76 @@ function renderPerformanceHistory() {
 
 performanceContainer.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
-    const btn = target.closest('.view-report-btn');
-    if (btn) {
-        const item = btn.closest('.history-card') as HTMLElement;
+    
+    // Handle View Report Button
+    const viewBtn = target.closest('.view-report-btn');
+    if (viewBtn) {
+        const item = viewBtn.closest('.history-card') as HTMLElement;
         if (item) {
             const index = parseInt(item.dataset.attemptIndex, 10);
             const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
             renderPerformanceReport(history[index], true);
             showView(performanceReportView);
         }
+        return;
+    }
+    
+    // Handle Retry Test Button
+    const retryBtn = target.closest('.retry-test-btn');
+    if (retryBtn) {
+        e.stopPropagation();
+        const item = retryBtn.closest('.history-card') as HTMLElement;
+        if (item) {
+            const index = parseInt(item.dataset.attemptIndex, 10);
+            const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+            const attempt = history[index];
+            
+            if (attempt && attempt.fullTest) {
+                if (confirm(`🔄 Retry "${attempt.testName}"?\n\nThis will start a fresh attempt of the same test.`)) {
+                    // Start the test from the stored test data
+                    startTest(attempt.fullTest);
+                }
+            } else {
+                alert('⚠️ Test data not available for retry.');
+            }
+        }
+        return;
+    }
+    
+    // Handle Delete Result Button
+    const deleteBtn = target.closest('.delete-result-btn');
+    if (deleteBtn) {
+        e.stopPropagation();
+        const item = deleteBtn.closest('.history-card') as HTMLElement;
+        if (item) {
+            const index = parseInt(item.dataset.attemptIndex, 10);
+            const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+            const attemptName = history[index]?.testName || 'this result';
+            
+            if (confirm(`🗑️ Delete result for "${attemptName}"?\n\nThis action cannot be undone.`)) {
+                history.splice(index, 1);
+                saveToStorage('performanceHistory', history);
+                renderPerformanceHistory();
+                
+                // Show brief confirmation
+                showNotification('Result deleted successfully', 'success');
+            }
+        }
+        return;
     }
 });
+
+// Helper function to show notifications
+function showNotification(message: string, type: 'success' | 'error' | 'info' = 'success') {
+    const notification = document.createElement('div');
+    notification.className = `toast-notification toast-${type}`;
+    
+    const icon = type === 'success' ? 'check_circle' : type === 'error' ? 'error' : 'info';
+    notification.innerHTML = `<span class="material-symbols-outlined">${icon}</span> ${message}`;
+    
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 2500);
+}
 
 function renderPerformanceReport(attempt: TestAttempt, fromHistory: boolean = true) {
     currentAttemptForReport = attempt; // Store attempt for deeper analysis
@@ -2164,6 +2339,45 @@ function renderPerformanceReport(attempt: TestAttempt, fromHistory: boolean = tr
     }
 
     downloadReportBtn.onclick = () => handleDownloadReport(attempt);
+    
+    // Retry from report button
+    const retryFromReportBtn = document.getElementById('retry-from-report-btn');
+    if (retryFromReportBtn) {
+        retryFromReportBtn.onclick = () => {
+            if (attempt.fullTest) {
+                if (confirm(`🔄 Retry "${attempt.testName}"?\n\nThis will start a fresh attempt of the same test.`)) {
+                    startTest(attempt.fullTest);
+                }
+            } else {
+                alert('⚠️ Test data not available for retry.');
+            }
+        };
+    }
+    
+    // Delete from report button
+    const deleteFromReportBtn = document.getElementById('delete-from-report-btn');
+    if (deleteFromReportBtn) {
+        deleteFromReportBtn.onclick = () => {
+            if (confirm(`🗑️ Delete this result for "${attempt.testName}"?\n\nThis action cannot be undone.`)) {
+                const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+                const indexToDelete = history.findIndex(h => 
+                    h.completedAt === attempt.completedAt && h.testName === attempt.testName
+                );
+                
+                if (indexToDelete !== -1) {
+                    history.splice(indexToDelete, 1);
+                    saveToStorage('performanceHistory', history);
+                    showNotification('Result deleted successfully', 'success');
+                    
+                    // Navigate back
+                    if (reportReturnView === performanceView) {
+                        renderPerformanceHistory();
+                    }
+                    showView(reportReturnView);
+                }
+            }
+        };
+    }
 }
 
 // Add event delegation for Tab Switching
