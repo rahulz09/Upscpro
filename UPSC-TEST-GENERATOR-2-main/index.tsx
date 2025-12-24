@@ -366,13 +366,41 @@ let reportReturnView: HTMLElement = performanceView;
 
 
 // --- Gemini AI ---
-let ai: GoogleGenAI;
-try {
-    ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-} catch (e) {
-    console.error("Failed to initialize GoogleGenAI", e);
-    alert("Error: Could not initialize AI. Please ensure API_KEY is set correctly.");
+let ai: GoogleGenAI | null = null;
+
+// Initialize AI with better error handling and Replit support
+function initializeAI() {
+    try {
+        // Try to get API key from environment or localStorage
+        let apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+        
+        // Check localStorage for user-configured API key
+        if (!apiKey) {
+            apiKey = localStorage.getItem('gemini_api_key');
+        }
+        
+        // In Replit, try to get from window.replit
+        if (!apiKey && typeof window !== 'undefined' && (window as any).replit) {
+            // Replit environment variable access
+            apiKey = (window as any).replit?.env?.GEMINI_API_KEY;
+        }
+        
+        if (apiKey) {
+            ai = new GoogleGenAI({ apiKey });
+            console.log("AI initialized successfully");
+            return true;
+        } else {
+            console.warn("API key not found. AI features will be limited.");
+            return false;
+        }
+    } catch (e) {
+        console.error("Failed to initialize GoogleGenAI", e);
+        return false;
+    }
 }
+
+// Initialize on load
+initializeAI();
 
 const questionSchema = {
     type: Type.OBJECT,
@@ -670,17 +698,124 @@ document.querySelectorAll('.clear-text-btn').forEach(btn => {
 
 generateTestBtn.addEventListener('click', handleGenerateTest);
 
-async function handleGenerateTest() {
-    if (!ai) {
-        alert("AI Service is not available.");
-        return;
+// Parse bulk import questions without AI
+function parseBulkImportQuestions(text: string): Question[] {
+    const questions: Question[] = [];
+    
+    // Split by question number patterns (1., 2., Q1, Q.1, etc.)
+    const questionBlocks = text.split(/(?:^|\n)\s*(?:\d+\.|Q\d*\.?|Question\s+\d+)\s+/i);
+    
+    for (let block of questionBlocks) {
+        block = block.trim();
+        if (!block) continue;
+        
+        try {
+            // Extract question text (before options)
+            const questionMatch = block.match(/^(.+?)(?:\n|$)/);
+            if (!questionMatch) continue;
+            
+            let questionText = questionMatch[1].trim();
+            
+            // Extract options (a), b), c), d) or A), B), C), D) or a. b. c. d.
+            const optionPatterns = [
+                /([a-dA-D])[\)\.]\s*([^\n]+)/g,
+                /([a-dA-D])\s*[\)\.]\s*([^\n]+)/g
+            ];
+            
+            const options: string[] = [];
+            let optionMatch;
+            const optionMap: { [key: string]: string } = {};
+            
+            for (const pattern of optionPatterns) {
+                while ((optionMatch = pattern.exec(block)) !== null) {
+                    const letter = optionMatch[1].toUpperCase();
+                    const text = optionMatch[2].trim();
+                    if (!optionMap[letter] && text) {
+                        optionMap[letter] = text;
+                    }
+                }
+            }
+            
+            // Fill options array in order A, B, C, D
+            ['A', 'B', 'C', 'D'].forEach(letter => {
+                if (optionMap[letter]) {
+                    options.push(optionMap[letter]);
+                }
+            });
+            
+            if (options.length < 2) continue; // Need at least 2 options
+            
+            // Extract answer (Answer: A, Answer: c, Answer: 1, etc.)
+            let answerIndex = 0;
+            const answerMatch = block.match(/Answer\s*[:=]\s*([a-dA-D1-4])/i);
+            if (answerMatch) {
+                const answerValue = answerMatch[1].toUpperCase();
+                if (answerValue >= 'A' && answerValue <= 'D') {
+                    answerIndex = answerValue.charCodeAt(0) - 'A'.charCodeAt(0);
+                } else if (answerValue >= '1' && answerValue <= '4') {
+                    answerIndex = parseInt(answerValue) - 1;
+                }
+            }
+            
+            // Extract explanation
+            let explanation = '';
+            const explanationMatch = block.match(/Explanation\s*[:=]\s*(.+?)(?:\n|Subject|Topic|$)/is);
+            if (explanationMatch) {
+                explanation = explanationMatch[1].trim();
+            } else {
+                explanation = 'No explanation provided.';
+            }
+            
+            // Extract subject and topic
+            let subject = 'General';
+            let topic = 'General';
+            
+            const subjectMatch = block.match(/Subject\s*[:=]\s*([^\n|]+)/i);
+            if (subjectMatch) {
+                subject = subjectMatch[1].trim();
+            }
+            
+            const topicMatch = block.match(/Topic\s*[:=]\s*([^\n|]+)/i);
+            if (topicMatch) {
+                topic = topicMatch[1].trim();
+            }
+            
+            // If subject/topic are in format "Subject: X | Topic: Y"
+            const pipeMatch = block.match(/Subject\s*[:=]\s*([^|]+)\s*\|\s*Topic\s*[:=]\s*([^\n]+)/i);
+            if (pipeMatch) {
+                subject = pipeMatch[1].trim();
+                topic = pipeMatch[2].trim();
+            }
+            
+            // Ensure we have 4 options (pad if needed)
+            while (options.length < 4) {
+                options.push(`Option ${options.length + 1}`);
+            }
+            
+            questions.push({
+                question: questionText,
+                options: options.slice(0, 4),
+                answer: Math.min(answerIndex, options.length - 1),
+                explanation: explanation,
+                subject: subject,
+                topic: topic
+            });
+        } catch (e) {
+            console.warn('Failed to parse question block:', e);
+            continue;
+        }
     }
+    
+    return questions;
+}
 
+async function handleGenerateTest() {
     loader.classList.remove('hidden');
     generateTestBtn.disabled = true;
 
     let source = "Custom Input";
     let contentsForApi;
+    let parsedQuestions: Question[] | null = null;
 
     const numQuestions = parseInt(questionsSlider.value, 10);
     const language = languageSelect.value;
@@ -691,6 +826,9 @@ async function handleGenerateTest() {
     try {
         switch (activeTabInput.type) {
             case 'topic':
+                if (!ai) {
+                    throw new Error("AI Service is not available. Please configure API key.");
+                }
                 const topic = topicInput.value.trim();
                 if (!topic) throw new Error('Please enter a topic.');
                 source = topic;
@@ -698,6 +836,9 @@ async function handleGenerateTest() {
                 contentsForApi = promptTopic;
                 break;
             case 'text':
+                if (!ai) {
+                    throw new Error("AI Service is not available. Please configure API key.");
+                }
                 const text = textInput.value.trim();
                 if (!text) throw new Error('Please paste some text.');
                 source = "Pasted Text";
@@ -708,22 +849,19 @@ async function handleGenerateTest() {
                 const manualText = manualInput.value.trim();
                 if (!manualText) throw new Error('Please paste your questions in the text area.');
                 source = "Bulk Import";
-                const promptManual = `Analyze the following text and extract ALL multiple-choice questions found within it.
                 
-                The text is expected to contain questions in a format similar to:
-                "Q. Question text... A) Opt1 B) Opt2... Answer: A Explanation: ..."
+                // Parse without AI
+                parsedQuestions = parseBulkImportQuestions(manualText);
                 
-                Your task:
-                1. Extract every valid question.
-                2. Map options to a string array.
-                3. Determine the correct answer index (0 for A/1, 1 for B/2, etc).
-                4. Extract explanation if present, otherwise generate a brief one.
-                5. Extract Subject and Topic if present, otherwise infer them from the question content.
-                6. Return the result strictly as a JSON array matching the schema.
+                if (parsedQuestions.length === 0) {
+                    throw new Error('Could not parse any questions from the provided text. Please check the format matches the example.');
+                }
                 
-                Input Text:
-                """${manualText}"""`;
-                contentsForApi = promptManual;
+                // Limit to requested number
+                if (parsedQuestions.length > numQuestions) {
+                    parsedQuestions = parsedQuestions.slice(0, numQuestions);
+                }
+                
                 break;
             case 'file':
                 const file = fileUpload.files[0];
@@ -780,34 +918,46 @@ async function handleGenerateTest() {
                 break;
         }
 
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: contentsForApi,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: questionSchema,
-                },
-            },
-        });
-
-        if (!response || !response.text) {
-            console.error("Invalid AI Response:", response);
-            const finishReason = response?.candidates?.[0]?.finishReason;
-            let errorMessage = "AI did not return a valid response. It might be empty or malformed.";
-            if (finishReason === 'SAFETY') {
-                errorMessage = "The request was blocked due to safety concerns. Please adjust your input text or file.";
-            } else if (finishReason) {
-                errorMessage = `Generation failed. Reason: ${finishReason}.`;
+        let parsedResponse: Question[];
+        
+        // If we already parsed questions (bulk import), use them
+        if (parsedQuestions && parsedQuestions.length > 0) {
+            parsedResponse = parsedQuestions;
+        } else {
+            // Otherwise, use AI
+            if (!ai) {
+                throw new Error("AI Service is not available. Please configure API key.");
             }
-            throw new Error(errorMessage);
-        }
+            
+            const response = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: contentsForApi,
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: Type.ARRAY,
+                        items: questionSchema,
+                    },
+                },
+            });
 
-        const parsedResponse = JSON.parse(response.text);
+            if (!response || !response.text) {
+                console.error("Invalid AI Response:", response);
+                const finishReason = response?.candidates?.[0]?.finishReason;
+                let errorMessage = "AI did not return a valid response. It might be empty or malformed.";
+                if (finishReason === 'SAFETY') {
+                    errorMessage = "The request was blocked due to safety concerns. Please adjust your input text or file.";
+                } else if (finishReason) {
+                    errorMessage = `Generation failed. Reason: ${finishReason}.`;
+                }
+                throw new Error(errorMessage);
+            }
 
-        if (!Array.isArray(parsedResponse) || parsedResponse.length === 0) {
-            throw new Error("Invalid response format from AI. The generated content was not a valid list of questions.");
+            parsedResponse = JSON.parse(response.text);
+
+            if (!Array.isArray(parsedResponse) || parsedResponse.length === 0) {
+                throw new Error("Invalid response format from AI. The generated content was not a valid list of questions.");
+            }
         }
 
         currentTest = {
@@ -1010,10 +1160,11 @@ saveTestBtn.addEventListener('click', () => {
     
     if (existingIndex > -1) {
         tests[existingIndex] = currentTest;
-        alert('Test updated successfully!');
+        // Show success notification without blocking popup
+        showNotification('Test updated successfully!', 'success');
     } else {
         tests.unshift(currentTest);
-        alert('Test created successfully!');
+        showNotification('Test created successfully!', 'success');
     }
     
     saveToStorage('tests', tests);
@@ -1021,43 +1172,119 @@ saveTestBtn.addEventListener('click', () => {
     showView(allTestsView);
 });
 
+// Notification system to replace alerts
+function showNotification(message: string, type: 'success' | 'error' | 'info' = 'info') {
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <span class="material-symbols-outlined">${type === 'success' ? 'check_circle' : type === 'error' ? 'error' : 'info'}</span>
+        <span>${message}</span>
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => notification.classList.add('show'), 10);
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
 
 // --- All Tests & Test Detail Logic ---
 function renderAllTests() {
     const tests = getFromStorage<Test[]>('tests', []);
     if (tests.length === 0) {
-        allTestsContainer.innerHTML = `<p class="placeholder">You haven't saved any tests yet.</p>`;
+        allTestsContainer.innerHTML = `
+            <div class="empty-state">
+                <span class="material-symbols-outlined">library_books</span>
+                <h3>No Tests Yet</h3>
+                <p>Create your first test to get started!</p>
+            </div>
+        `;
         return;
     }
+    
+    // Get performance history to show last attempt info
+    const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+    
     allTestsContainer.innerHTML = tests.map(test => {
         const dateObj = new Date(test.createdAt);
-        const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        const date = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        const time = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        
+        // Find last attempt for this test
+        const lastAttempt = history
+            .filter(a => a.testName === test.name || a.fullTest.id === test.id)
+            .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime())[0];
+        
+        // Calculate subject distribution
+        const subjects = new Set(test.questions.map(q => q.subject || 'General'));
+        const subjectCount = subjects.size;
         
         return `
-        <div class="saved-test-item" data-testid="${test.id}">
-            <div>
-                <h3>${test.name}</h3>
-                <p>Created on ${date}</p>
+        <div class="saved-test-item enhanced" data-testid="${test.id}">
+            <div class="test-header-section">
+                <div class="test-icon-wrapper">
+                    <span class="material-symbols-outlined">quiz</span>
+                </div>
+                <div class="test-title-section">
+                    <h3>${test.name}</h3>
+                    <div class="test-meta-info">
+                        <span class="meta-item">
+                            <span class="material-symbols-outlined">calendar_today</span>
+                            ${date} at ${time}
+                        </span>
+                    </div>
+                </div>
             </div>
-            <div class="test-stats-preview">
-                 <div class="stat-pill">
-                    <span class="material-symbols-outlined">quiz</span> ${test.questions.length} Questions
+            
+            <div class="test-stats-preview enhanced">
+                 <div class="stat-pill enhanced">
+                    <span class="material-symbols-outlined">quiz</span>
+                    <div>
+                        <span class="stat-value">${test.questions.length}</span>
+                        <span class="stat-label">Questions</span>
+                    </div>
                  </div>
-                 <div class="stat-pill">
-                    <span class="material-symbols-outlined">timer</span> ${test.duration} mins
+                 <div class="stat-pill enhanced">
+                    <span class="material-symbols-outlined">timer</span>
+                    <div>
+                        <span class="stat-value">${test.duration}</span>
+                        <span class="stat-label">Minutes</span>
+                    </div>
                  </div>
+                 <div class="stat-pill enhanced">
+                    <span class="material-symbols-outlined">category</span>
+                    <div>
+                        <span class="stat-value">${subjectCount}</span>
+                        <span class="stat-label">Subjects</span>
+                    </div>
+                 </div>
+                 ${lastAttempt ? `
+                 <div class="stat-pill enhanced last-score" style="--score-color: ${lastAttempt.score >= 60 ? 'var(--success-color)' : lastAttempt.score >= 40 ? 'var(--warning-color)' : 'var(--danger-color)'}">
+                    <span class="material-symbols-outlined">star</span>
+                    <div>
+                        <span class="stat-value">${lastAttempt.score.toFixed(0)}%</span>
+                        <span class="stat-label">Last Score</span>
+                    </div>
+                 </div>
+                 ` : ''}
             </div>
-            <div class="test-card-actions">
-                <button class="start-btn" aria-label="Start Test" title="Start Test">
-                     <span class="material-symbols-outlined">play_arrow</span> Start
+            
+            <div class="test-card-actions enhanced">
+                <button class="start-btn enhanced" aria-label="Start Test" title="Start Test">
+                     <span class="material-symbols-outlined">play_arrow</span>
+                     <span>Start</span>
                 </button>
-                 <button class="edit-btn" aria-label="Edit Test" title="Edit Test">
+                 <button class="edit-btn enhanced" aria-label="Edit Test" title="Edit Test">
                      <span class="material-symbols-outlined">edit</span>
+                     <span>Edit</span>
                 </button>
-                <button class="download-test-btn" aria-label="Download JSON" title="Download">
+                <button class="download-test-btn enhanced" aria-label="Download JSON" title="Download">
                      <span class="material-symbols-outlined">download</span>
+                     <span>Export</span>
                 </button>
-                <button class="delete-btn" aria-label="Delete Test" title="Delete">
+                <button class="delete-btn enhanced" aria-label="Delete Test" title="Delete">
                      <span class="material-symbols-outlined">delete</span>
                 </button>
             </div>
@@ -2060,41 +2287,99 @@ function renderTopicWiseAnalysis(attempt: TestAttempt) {
     const strongTopics = sortedTopics.filter(t => t.accuracy >= 70).slice(0, 3);
     const weakTopics = sortedTopics.filter(t => t.accuracy < 50).slice(-3).reverse();
     
+    // Calculate additional insights
+    const avgAccuracy = sortedTopics.reduce((sum, t) => sum + t.accuracy, 0) / sortedTopics.length;
+    const totalTopics = sortedTopics.length;
+    const strongCount = sortedTopics.filter(t => t.accuracy >= 70).length;
+    const weakCount = sortedTopics.filter(t => t.accuracy < 50).length;
+    
     topicWiseContainer.innerHTML = `
-        <div class="topic-insights-grid">
+        <div class="topic-summary-cards">
+            <div class="topic-summary-card">
+                <span class="material-symbols-outlined">analytics</span>
+                <div>
+                    <div class="summary-value">${avgAccuracy.toFixed(1)}%</div>
+                    <div class="summary-label">Avg Topic Accuracy</div>
+                </div>
+            </div>
+            <div class="topic-summary-card">
+                <span class="material-symbols-outlined">check_circle</span>
+                <div>
+                    <div class="summary-value" style="color: var(--success-color);">${strongCount}</div>
+                    <div class="summary-label">Strong Topics</div>
+                </div>
+            </div>
+            <div class="topic-summary-card">
+                <span class="material-symbols-outlined">warning</span>
+                <div>
+                    <div class="summary-value" style="color: var(--danger-color);">${weakCount}</div>
+                    <div class="summary-label">Need Improvement</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="topic-insights-grid enhanced">
             <div class="insight-card strength">
-                <h4><span class="material-symbols-outlined">trending_up</span> Strong Topics</h4>
+                <div class="insight-header">
+                    <span class="material-symbols-outlined">trending_up</span>
+                    <h4>Strong Topics</h4>
+                </div>
                 ${strongTopics.length > 0 ? strongTopics.map(t => `
-                    <div class="insight-item">
-                        <span class="topic-name">${t.topic}</span>
-                        <span class="topic-score" style="color: var(--success-color)">${t.accuracy.toFixed(0)}%</span>
+                    <div class="insight-item enhanced">
+                        <div class="insight-item-content">
+                            <span class="topic-name">${t.topic}</span>
+                            <span class="topic-subject-mini">${t.subject}</span>
+                        </div>
+                        <div class="insight-item-stats">
+                            <span class="topic-score" style="color: var(--success-color)">${t.accuracy.toFixed(0)}%</span>
+                            <div class="topic-mini-bar">
+                                <div class="topic-mini-bar-fill" style="width: ${t.accuracy}%; background: var(--success-color);"></div>
+                            </div>
+                        </div>
                     </div>
                 `).join('') : '<p class="no-data">No strong topics identified yet</p>'}
             </div>
             <div class="insight-card weakness">
-                <h4><span class="material-symbols-outlined">trending_down</span> Need Improvement</h4>
+                <div class="insight-header">
+                    <span class="material-symbols-outlined">trending_down</span>
+                    <h4>Need Improvement</h4>
+                </div>
                 ${weakTopics.length > 0 ? weakTopics.map(t => `
-                    <div class="insight-item">
-                        <span class="topic-name">${t.topic}</span>
-                        <span class="topic-score" style="color: var(--danger-color)">${t.accuracy.toFixed(0)}%</span>
+                    <div class="insight-item enhanced">
+                        <div class="insight-item-content">
+                            <span class="topic-name">${t.topic}</span>
+                            <span class="topic-subject-mini">${t.subject}</span>
+                        </div>
+                        <div class="insight-item-stats">
+                            <span class="topic-score" style="color: var(--danger-color)">${t.accuracy.toFixed(0)}%</span>
+                            <div class="topic-mini-bar">
+                                <div class="topic-mini-bar-fill" style="width: ${t.accuracy}%; background: var(--danger-color);"></div>
+                            </div>
+                        </div>
                     </div>
                 `).join('') : '<p class="no-data">Great! No weak topics found</p>'}
             </div>
         </div>
         
-        <h4 style="margin-top: 1.5rem;">All Topics Performance</h4>
-        <div class="topic-chart-container">
+        <h4 style="margin-top: 2rem; margin-bottom: 1rem;">All Topics Performance</h4>
+        <div class="topic-chart-container enhanced">
             ${sortedTopics.map(t => {
                 const barColor = t.accuracy >= 70 ? 'var(--success-color)' : t.accuracy >= 50 ? 'var(--warning-color)' : 'var(--danger-color)';
                 return `
-                    <div class="topic-chart-row">
+                    <div class="topic-chart-row enhanced">
                         <div class="topic-chart-label">
                             <span class="topic-name">${t.topic}</span>
                             <span class="topic-subject">${t.subject}</span>
                         </div>
                         <div class="topic-chart-bar-container">
-                            <div class="topic-chart-bar" style="width: ${t.accuracy}%; background: ${barColor}"></div>
-                            <span class="topic-chart-value">${t.correct}/${t.total} (${t.accuracy.toFixed(0)}%)</span>
+                            <div class="topic-chart-bar-wrapper">
+                                <div class="topic-chart-bar" style="width: ${t.accuracy}%; background: ${barColor}"></div>
+                            </div>
+                            <div class="topic-chart-value-group">
+                                <span class="topic-chart-value">${t.correct}/${t.total}</span>
+                                <span class="topic-chart-percentage" style="color: ${barColor}">${t.accuracy.toFixed(0)}%</span>
+                                <span class="topic-chart-time">Avg: ${t.avgTime.toFixed(1)}s</span>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -2713,30 +2998,67 @@ function renderAnalyticsDashboard() {
     `}).join('');
 }
 
-// Score Trend Graph
+// Score Trend Graph - Fixed to prevent duplication
 function renderScoreTrendGraph(sortedHistory: TestAttempt[]) {
+    // Remove existing trend graph if it exists
+    const existingTrend = document.querySelector('.score-trend-card');
+    if (existingTrend) {
+        existingTrend.remove();
+    }
+    
+    if (sortedHistory.length === 0) return;
+    
     const trendContainer = document.createElement('div');
     trendContainer.className = 'report-card score-trend-card';
+    
+    // Calculate trend statistics
+    const recentScores = sortedHistory.slice(0, 10).reverse();
+    const avgRecent = recentScores.reduce((sum, a) => sum + a.score, 0) / recentScores.length;
+    const oldestScore = sortedHistory.length > 10 ? sortedHistory[sortedHistory.length - 1].score : recentScores[0].score;
+    const trendChange = avgRecent - oldestScore;
+    const trendDirection = trendChange > 2 ? 'up' : trendChange < -2 ? 'down' : 'flat';
+    const trendColor = trendChange > 2 ? 'var(--success-color)' : trendChange < -2 ? 'var(--danger-color)' : 'var(--text-muted)';
+    
     trendContainer.innerHTML = `
-        <h3><span class="material-symbols-outlined">show_chart</span> Score Trend</h3>
-        <div class="score-trend-graph">
-            ${sortedHistory.slice(0, 10).reverse().map((attempt, i) => {
-                const height = Math.max(attempt.score, 5);
+        <div class="trend-header">
+            <h3><span class="material-symbols-outlined">show_chart</span> Score Trend</h3>
+            <div class="trend-summary">
+                <span class="trend-indicator ${trendDirection}" style="color: ${trendColor};">
+                    <span class="material-symbols-outlined">${trendDirection === 'up' ? 'trending_up' : trendDirection === 'down' ? 'trending_down' : 'trending_flat'}</span>
+                    ${trendChange > 0 ? '+' : ''}${trendChange.toFixed(1)}%
+                </span>
+                <span class="trend-avg">Avg: ${avgRecent.toFixed(1)}%</span>
+            </div>
+        </div>
+        <div class="score-trend-graph enhanced">
+            ${recentScores.map((attempt, i) => {
+                const height = Math.max((attempt.score / 100) * 100, 5);
                 const barColor = attempt.score >= 60 ? 'var(--success-color)' : attempt.score >= 40 ? 'var(--warning-color)' : 'var(--danger-color)';
                 const date = new Date(attempt.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
                 return `
-                    <div class="trend-bar-container" title="${attempt.testName}: ${attempt.score.toFixed(1)}%">
+                    <div class="trend-bar-container enhanced" title="${attempt.testName}: ${attempt.score.toFixed(1)}%">
+                        <div class="trend-bar-value">${attempt.score.toFixed(0)}%</div>
                         <div class="trend-bar" style="height: ${height}%; background: ${barColor}"></div>
                         <span class="trend-label">${date}</span>
                     </div>
                 `;
             }).join('')}
         </div>
-        <p class="trend-caption">Last ${Math.min(sortedHistory.length, 10)} tests performance</p>
+        <div class="trend-footer">
+            <p class="trend-caption">Last ${Math.min(sortedHistory.length, 10)} tests performance</p>
+            <div class="trend-legend">
+                <span class="legend-item"><span class="legend-dot" style="background: var(--success-color);"></span> ≥60%</span>
+                <span class="legend-item"><span class="legend-dot" style="background: var(--warning-color);"></span> 40-59%</span>
+                <span class="legend-item"><span class="legend-dot" style="background: var(--danger-color);"></span> &lt;40%</span>
+            </div>
+        </div>
     `;
     
     // Insert after stats grid
-    analyticsStatsGrid.parentNode?.insertBefore(trendContainer, analyticsStatsGrid.nextSibling);
+    const analyticsContentWrapper = document.getElementById('analytics-content-wrapper');
+    if (analyticsContentWrapper && analyticsStatsGrid) {
+        analyticsContentWrapper.insertBefore(trendContainer, analyticsStatsGrid.nextSibling);
+    }
 }
 
 // Add Event delegation for Subject Cards
