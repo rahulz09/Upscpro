@@ -1,5 +1,38 @@
 # UPSC Test Generator - Major Improvements & Updates
 
+## Version 2.1.0 - Results Management & UI Improvements
+
+### 🗑️ Result Delete Feature
+- **Individual Delete**: Delete any test result from history with one click
+- **Delete from Report**: Remove results directly from the detailed report view
+- **Bulk Clear**: Clear all results at once from settings
+- **Confirmation Dialogs**: Safe deletion with confirmation prompts
+
+### 🔄 Retry Test Feature
+- **Quick Retry**: Retry any completed test from the results history
+- **Retry from Report**: Start fresh attempt from the detailed report view
+- **Preserved Test Data**: Full test data stored with each result for retry
+
+### 🔍 Results Search & Filter
+- **Search Results**: Find results by test name instantly
+- **Sort Options**: Sort by Newest, Oldest, Highest Score, Lowest Score
+- **Real-time Filtering**: Instant results as you type
+
+### ⚙️ Simplified Settings
+- **Removed Replit Instructions**: Cleaner, universal setup guide
+- **Danger Zone**: Separate section for destructive actions
+- **Clear Results Only**: Delete only results, keep tests
+- **Clear Tests Only**: Delete only tests, keep results
+- **Clear Everything**: Full data reset option
+
+### 🎨 UI Fixes & Improvements
+- **Report Tabs**: Fixed mobile display for 7 tabs
+- **Toast Notifications**: Better feedback for user actions
+- **Button Layout**: Improved footer buttons in result cards
+- **Mobile Responsive**: Better experience on small screens
+
+---
+
 ## Version 2.0.0 - Complete Overhaul
 
 This document outlines all the major improvements made to the UPSC Test Generator application.
