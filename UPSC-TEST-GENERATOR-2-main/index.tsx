@@ -2214,19 +2214,7 @@ performanceContainer.addEventListener('click', (e) => {
         if (item) {
             const index = parseInt(item.dataset.attemptIndex, 10);
             const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
-            
-            if (isNaN(index) || index < 0 || index >= history.length) {
-                showToast({ message: 'Unable to load result. Please try again.', type: 'error' });
-                return;
-            }
-            
-            const attempt = history[index];
-            if (!attempt) {
-                showToast({ message: 'Result data not found.', type: 'error' });
-                return;
-            }
-            
-            renderPerformanceReport(attempt, true);
+            renderPerformanceReport(history[index], true);
             showView(performanceReportView);
         }
         return;
@@ -2275,30 +2263,10 @@ performanceContainer.addEventListener('click', (e) => {
         }
         return;
     }
-    
-    // Handle clicking on the card itself (outside buttons) - also open report
-    const historyCard = target.closest('.history-card') as HTMLElement;
-    if (historyCard && !target.closest('button')) {
-        const index = parseInt(historyCard.dataset.attemptIndex, 10);
-        const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
-        
-        if (!isNaN(index) && index >= 0 && index < history.length) {
-            const attempt = history[index];
-            if (attempt) {
-                renderPerformanceReport(attempt, true);
-                showView(performanceReportView);
-            }
-        }
-    }
 });
 
-// Render detailed performance report
+// Helper function to show notifications
 function renderPerformanceReport(attempt: TestAttempt, fromHistory: boolean = true) {
-    if (!attempt || !attempt.fullTest) {
-        showToast({ message: 'Invalid result data. Cannot display report.', type: 'error' });
-        return;
-    }
-    
     currentAttemptForReport = attempt; // Store attempt for deeper analysis
     
     // Update Back button logic based on entry point
