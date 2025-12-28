@@ -1547,6 +1547,7 @@ input[type="range"]::-moz-range-thumb:hover {
     position: relative;
     overflow: hidden;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
 }
 
 .history-card::before {
