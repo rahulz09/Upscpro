@@ -478,61 +478,6 @@ Subject: Science | Topic: Solar System
       </div>
       <div class="modal-body">
         <div class="settings-section">
-          <h4><span class="material-symbols-outlined">cloud</span> Backend Configuration</h4>
-          <p class="settings-description">Configure API keys and backend settings for AI features</p>
-          
-          <div class="setting-item">
-            <label for="api-key-input">
-              <span class="material-symbols-outlined">key</span>
-              Google Gemini API Key
-            </label>
-            <div class="input-with-action">
-              <input type="password" id="api-key-input" placeholder="Enter your Gemini API key" autocomplete="off">
-              <button type="button" id="toggle-api-key" class="icon-btn-small" title="Show/Hide">
-                <span class="material-symbols-outlined">visibility</span>
-              </button>
-            </div>
-            <small>Get your API key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></small>
-          </div>
-
-          <button id="save-settings-btn" class="action-btn save-btn">
-            <span class="material-symbols-outlined">save</span> Save Settings
-          </button>
-        </div>
-
-        <div class="settings-section">
-          <h4><span class="material-symbols-outlined">storage</span> Data Management</h4>
-          <p class="settings-description">Backup and restore your data</p>
-          
-          <div class="settings-actions-grid">
-            <button id="export-data-btn" class="action-btn">
-              <span class="material-symbols-outlined">download</span>
-              Export All Data
-            </button>
-            <button id="import-data-btn" class="action-btn">
-              <span class="material-symbols-outlined">upload</span>
-              Import Backup
-            </button>
-          </div>
-          
-          <p class="settings-description" style="margin-top: 1.5rem;">Danger Zone - Irreversible Actions</p>
-          <div class="settings-actions-grid danger-zone">
-            <button id="clear-results-btn" class="action-btn danger-btn">
-              <span class="material-symbols-outlined">history</span>
-              Clear Results Only
-            </button>
-            <button id="clear-tests-btn" class="action-btn danger-btn">
-              <span class="material-symbols-outlined">quiz</span>
-              Clear Tests Only
-            </button>
-            <button id="clear-data-btn" class="action-btn danger-btn-full">
-              <span class="material-symbols-outlined">delete_forever</span>
-              Clear Everything
-            </button>
-          </div>
-        </div>
-
-        <div class="settings-section">
           <h4><span class="material-symbols-outlined">info</span> App Information</h4>
           <div class="info-grid">
             <div class="info-item">
@@ -552,6 +497,60 @@ Subject: Science | Topic: Solar System
               <span class="info-value" id="total-attempts">0</span>
             </div>
           </div>
+        </div>
+
+        <div class="settings-section">
+          <h4><span class="material-symbols-outlined">storage</span> Data Management</h4>
+          <p class="settings-description">Backup and restore your data</p>
+          
+          <div class="settings-actions-grid">
+            <button id="export-data-btn" class="action-btn">
+              <span class="material-symbols-outlined">download</span>
+              Export All Data
+            </button>
+            <button id="import-data-btn" class="action-btn">
+              <span class="material-symbols-outlined">upload</span>
+              Import Backup
+            </button>
+          </div>
+          
+          <p class="settings-description" style="margin-top: 1.5rem;">Danger Zone</p>
+          <div class="settings-actions-grid danger-zone">
+            <button id="clear-results-btn" class="action-btn danger-btn">
+              <span class="material-symbols-outlined">history</span>
+              Clear Results
+            </button>
+            <button id="clear-tests-btn" class="action-btn danger-btn">
+              <span class="material-symbols-outlined">quiz</span>
+              Clear Tests
+            </button>
+            <button id="clear-data-btn" class="action-btn danger-btn-full">
+              <span class="material-symbols-outlined">delete_forever</span>
+              Clear Everything
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4><span class="material-symbols-outlined">key</span> API Configuration</h4>
+          <p class="settings-description">Configure AI for generating tests</p>
+          
+          <div class="setting-item">
+            <label for="api-key-input">
+              Google Gemini API Key
+            </label>
+            <div class="input-with-action">
+              <input type="password" id="api-key-input" placeholder="Enter your Gemini API key" autocomplete="off">
+              <button type="button" id="toggle-api-key" class="icon-btn-small" title="Show/Hide">
+                <span class="material-symbols-outlined">visibility</span>
+              </button>
+            </div>
+            <small>Get free key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></small>
+          </div>
+
+          <button id="save-settings-btn" class="action-btn save-btn">
+            <span class="material-symbols-outlined">save</span> Save API Key
+          </button>
         </div>
       </div>
     </div>
