@@ -2631,6 +2631,46 @@ function renderTimeAnalysisCharts(attempt: TestAttempt) {
             </div>
         </div>
     `;
+
+    // Question Time Chart with Toggle Button
+    let perQuestionChartHTML = `
+        <div class="chart-section analysis-container">
+            <h4><span class="material-symbols-outlined">bar_chart</span> Time Spent Per Question</h4>
+            <div class="chart-legend">
+                <span class="legend-item"><span class="legend-dot" style="background: var(--success-color);"></span> Correct</span>
+                <span class="legend-item"><span class="legend-dot" style="background: var(--danger-color);"></span> Incorrect</span>
+                <span class="legend-item"><span class="legend-dot" style="background: var(--text-muted);"></span> Unanswered</span>
+            </div>
+    `;
+    
+    perQuestionChartHTML += '<div id="q-chart-container" class="chart question-time-chart" style="max-height: 300px; overflow-y: auto;">';
+
+    attempt.timePerQuestion.forEach((time, index) => {
+        const q = attempt.fullTest.questions[index];
+        const userAnswer = attempt.userAnswers[index];
+        let statusClass = 'bar-unanswered';
+        if (userAnswer === q.answer) {
+            statusClass = 'bar-correct';
+        } else if (userAnswer !== null) {
+            statusClass = 'bar-incorrect';
+        }
+        
+        const barWidth = Math.max((time / maxTime) * 100, 2);
+
+        perQuestionChartHTML += `
+            <div class="chart-row" style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                <div class="chart-label" style="width: 35px; font-size: 0.8rem;">Q${index + 1}</div>
+                <div class="chart-bar-container" style="flex: 1; height: 10px; background: var(--card-border-color); border-radius: 5px; overflow: hidden;">
+                    <div class="chart-bar ${statusClass}" style="width: ${barWidth}%; height: 100%;" title="Time: ${time.toFixed(1)}s"></div>
+                </div>
+                <div class="chart-value" style="width: 45px; font-size: 0.8rem; text-align: right;">${time.toFixed(1)}s</div>
+            </div>
+        `;
+    });
+    perQuestionChartHTML += '</div>';
+    
+    // Add the Expand Button
+    perQuestionChartHTML += \`<button id="expand-chart-btn" class="expand-chart-btn" style="width: 100%; margin-top: 10px; padding: 8px; border: 1px dashed var(--card-border-color); background: none; color: var(--primary-color); cursor: pointer; border-radius: 6px;"><span class="material-symbols-outlined" style="vertical-align: middle;">unfold_more</span> Show Full Chart</button></div>\`;
     
     // Question Time Chart with Toggle Button
     let perQuestionChartHTML = `
