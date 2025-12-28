@@ -1674,10 +1674,8 @@ input[type="range"]::-moz-range-thumb:hover {
     display: flex;
     justify-content: center;
     gap: 0.75rem;
-    padding-top: 1rem;
+    padding-top: 0.5rem;
     flex-wrap: wrap;
-    margin-top: auto;
-    border-top: 1px solid rgba(99, 102, 241, 0.1);
 }
 
 .view-report-btn {
@@ -1685,19 +1683,18 @@ input[type="range"]::-moz-range-thumb:hover {
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    padding: 0.75rem 1.5rem;
+    padding: 0.9rem 1.75rem;
     background: var(--primary-gradient);
     border: none;
-    border-radius: 10px;
+    border-radius: 12px;
     color: #fff;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s ease;
     box-shadow: 0 4px 16px rgba(79, 70, 229, 0.35);
-    flex: 1;
-    max-width: 200px;
-    min-height: 44px;
+    width: 100%;
+    max-width: 300px;
 }
 
 .view-report-btn:hover {
@@ -1718,13 +1715,12 @@ input[type="range"]::-moz-range-thumb:hover {
     padding: 0.75rem 1.25rem;
     background: rgba(16, 185, 129, 0.15);
     border: 1px solid rgba(16, 185, 129, 0.3);
-    border-radius: 10px;
+    border-radius: 12px;
     color: var(--success-color);
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s ease;
-    min-height: 44px;
 }
 
 .retry-test-btn:hover {
@@ -1753,8 +1749,6 @@ input[type="range"]::-moz-range-thumb:hover {
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s ease;
-    min-height: 44px;
-    min-width: 44px;
 }
 
 .delete-result-btn:hover {
@@ -2871,21 +2865,6 @@ p.error {
     display: block;
 }
 
-/* Time Analysis View */
-#time-analysis-view {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-}
-
-#time-analysis-view .time-stats-grid {
-    margin-bottom: 1.5rem;
-}
-
-#time-analysis-view .chart-section {
-    margin-top: 0;
-    margin-bottom: 1.5rem;
-}
 
 /* Time Analysis Charts */
 #time-analysis-container {
@@ -2966,22 +2945,11 @@ p.error {
 }
 
 .chart-section {
-    margin: 1.5rem 0;
-    padding: 1.25rem;
+    margin: 2rem 0;
+    padding: 1.5rem;
     background: linear-gradient(145deg, rgba(18, 18, 26, 0.6) 0%, rgba(31, 41, 55, 0.4) 100%);
     border-radius: 14px;
     border: 1px solid rgba(99, 102, 241, 0.1);
-    position: relative;
-    z-index: 1;
-    clear: both;
-}
-
-.chart-section:first-child {
-    margin-top: 0;
-}
-
-.chart-section:last-child {
-    margin-bottom: 0;
 }
 
 .chart-section h4 {
@@ -3014,15 +2982,11 @@ p.error {
 }
 
 .chart-row.enhanced {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
     padding: 1rem;
     background: rgba(0, 0, 0, 0.2);
     border-radius: 10px;
     border: 1px solid rgba(99, 102, 241, 0.08);
     transition: all 0.3s ease;
-    margin-bottom: 0.5rem;
 }
 
 .chart-row.enhanced:hover {
@@ -3030,27 +2994,16 @@ p.error {
     border-color: rgba(99, 102, 241, 0.2);
 }
 
-.chart-row.enhanced .chart-label {
-    flex-basis: auto;
-    min-width: 120px;
-    max-width: 180px;
-    text-align: left;
-}
-
 .chart-label-main {
     font-weight: 600;
     color: var(--heading-color);
-    font-size: 0.9rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 0.95rem;
 }
 
 .chart-label-sub {
     font-size: 0.75rem;
     color: var(--text-muted);
     margin-top: 0.2rem;
-    white-space: nowrap;
 }
 
 .chart-bar-label {
@@ -3212,35 +3165,28 @@ p.error {
     gap: 0.4rem;
 }
 .question-time-chart {
-    max-height: 300px;
+    max-height: 250px;
     overflow-y: auto;
-    overflow-x: hidden;
     padding-right: 8px;
     transition: max-height 0.5s ease;
-    position: relative;
 }
 
 .question-time-chart.expanded {
-    max-height: none;
+    max-height: 2000px;
     overflow-y: visible;
 }
 
 .expand-chart-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
+    display: block;
     width: 100%;
-    margin-top: 1rem;
-    padding: 0.75rem 1rem;
+    margin-top: 0.75rem;
+    padding: 0.65rem;
     background: var(--card-background);
     border: 1px solid var(--card-border-color);
     color: var(--primary-color);
     border-radius: 8px;
     cursor: pointer;
     font-weight: 500;
-    font-size: 0.9rem;
-    transition: all 0.3s ease;
     transition: all 0.2s;
     font-size: 0.9rem;
     min-height: 44px;
@@ -3254,37 +3200,18 @@ p.error {
 .chart-row {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.4rem 0;
+    gap: 0.5rem;
 }
 .chart-label {
-    flex-basis: 40px;
-    flex-shrink: 0;
-    text-align: right;
-    font-size: 0.8rem;
-    opacity: 0.9;
-    white-space: nowrap;
-}
-.chart-value {
     flex-basis: 50px;
     flex-shrink: 0;
     text-align: right;
     font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--text-muted);
+    opacity: 0.9;
 }
 .subject-time-chart .chart-label {
     font-weight: 500;
-    flex-basis: auto;
-    min-width: 100px;
-    max-width: 150px;
-    text-align: left;
-}
-.subject-time-chart.enhanced .chart-row {
-    padding: 0.75rem;
-    margin-bottom: 0.5rem;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
+    flex-basis: 80px;
 }
 .chart-bar-container {
     flex-grow: 1;
@@ -3954,33 +3881,26 @@ p.error {
         padding-top: 0;
     }
 
-    /* History card - tablet layout */
+    /* History card - tablet grid */
     .history-card {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: center;
+        gap: 1.25rem;
         padding: 1.5rem;
     }
-    
-    .history-card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
+
+    .history-score-area {
+        flex-direction: column;
+        border-top: none;
+        padding-top: 0;
+        gap: 0.3rem;
     }
 
-    .history-card-footer {
-        display: flex;
-        justify-content: flex-start;
-        gap: 0.75rem;
-        padding-top: 0.75rem;
-        border-top: 1px solid var(--card-border-color);
-        margin-top: auto;
-    }
-    
-    .history-stats-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 1rem;
+    .history-card .view-test-btn {
+        width: auto;
+        margin-top: 0;
+        grid-column: 1 / -1;
     }
 
     /* Test Attempt - Tablet */
