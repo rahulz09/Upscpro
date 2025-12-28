@@ -214,7 +214,7 @@ loginForm.addEventListener('submit', (e) => {
     if (result.success && result.user) {
         loginUser(result.user, remember);
     } else {
-        showToast({ message: result.message, type: 'error' });
+        alert(result.message);
     }
 });
 
@@ -227,14 +227,14 @@ registerForm.addEventListener('submit', (e) => {
     const confirm = registerConfirmInput.value;
     
     if (password !== confirm) {
-        showToast({ message: 'Passwords do not match!', type: 'error' });
+        alert('Passwords do not match!');
         return;
     }
     
     const result = registerUser(name, username, password);
     
     if (result.success) {
-        showToast({ message: result.message, type: 'success' });
+        alert(result.message);
         // Auto-login after registration
         const authResult = authenticateUser(username, password);
         if (authResult.success && authResult.user) {
@@ -243,7 +243,7 @@ registerForm.addEventListener('submit', (e) => {
             showLoginForm();
         }
     } else {
-        showToast({ message: result.message, type: 'error' });
+        alert(result.message);
     }
 });
 
@@ -400,74 +400,6 @@ function initializeAI() {
 
 initializeAI();
 
-// --- Toast Notification System ---
-type ToastType = 'success' | 'error' | 'warning' | 'info';
-
-interface ToastOptions {
-    title?: string;
-    message: string;
-    type?: ToastType;
-    duration?: number;
-}
-
-function showToast(options: ToastOptions | string) {
-    const toastContainer = document.getElementById('toast-container');
-    if (!toastContainer) return;
-
-    const opts: ToastOptions = typeof options === 'string' 
-        ? { message: options, type: 'info' } 
-        : options;
-
-    const { title, message, type = 'info', duration = 3500 } = opts;
-
-    const icons: Record<ToastType, string> = {
-        success: 'check_circle',
-        error: 'error',
-        warning: 'warning',
-        info: 'info'
-    };
-
-    const titles: Record<ToastType, string> = {
-        success: 'Success',
-        error: 'Error',
-        warning: 'Warning',
-        info: 'Info'
-    };
-
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.style.setProperty('--toast-duration', `${duration}ms`);
-    
-    toast.innerHTML = `
-        <div class="toast-icon">
-            <span class="material-symbols-outlined">${icons[type]}</span>
-        </div>
-        <div class="toast-content">
-            <div class="toast-title">${title || titles[type]}</div>
-            <div class="toast-message">${message}</div>
-        </div>
-        <button class="toast-close" aria-label="Close">
-            <span class="material-symbols-outlined">close</span>
-        </button>
-        <div class="toast-progress">
-            <div class="toast-progress-bar"></div>
-        </div>
-    `;
-
-    const closeBtn = toast.querySelector('.toast-close');
-    const closeToast = () => {
-        toast.classList.add('hiding');
-        setTimeout(() => toast.remove(), 300);
-    };
-
-    closeBtn?.addEventListener('click', closeToast);
-    
-    toastContainer.appendChild(toast);
-
-    // Auto remove after duration
-    setTimeout(closeToast, duration);
-}
-
 const questionSchema = {
     type: Type.OBJECT,
     properties: {
@@ -541,7 +473,7 @@ restoreFileInput.addEventListener('change', (event) => {
                     saveToStorage('tests', uniqueTests);
                     saveToStorage('performanceHistory', newHistory);
 
-                    showToast({ message: 'Data restored successfully!', type: 'success' });
+                    alert("Data restored successfully!");
                     // Reload current view if necessary
                     if (!allTestsView.classList.contains('hidden')) renderAllTests();
                     if (!performanceView.classList.contains('hidden')) renderPerformanceHistory();
@@ -560,7 +492,7 @@ restoreFileInput.addEventListener('change', (event) => {
                     tests.unshift(newTest);
                     saveToStorage('tests', tests);
 
-                    showToast({ message: `Test "${data.name}" imported successfully!`, type: 'success' });
+                    alert(`Test "${data.name}" imported successfully!`);
                     if (!allTestsView.classList.contains('hidden')) renderAllTests();
                 }
             } 
@@ -570,7 +502,7 @@ restoreFileInput.addEventListener('change', (event) => {
 
         } catch (error) {
             console.error("Error restoring data:", error);
-            showToast({ message: `Failed to restore data. ${error.message}`, type: 'error' });
+            alert(`Failed to restore data. ${error.message}`);
         } finally {
             input.value = ''; // Reset input
         }
@@ -692,15 +624,15 @@ saveSettingsBtn.addEventListener('click', () => {
         // Reinitialize AI with new key
         try {
             ai = new GoogleGenAI({ apiKey: userApiKey });
-            showToast({ message: 'Settings saved! AI is now configured.', type: 'success' });
+            alert('✅ Settings saved successfully! AI is now configured.');
         } catch (e) {
-            showToast({ message: 'Settings saved, but failed to initialize AI. Please check your API key.', type: 'warning' });
+            alert('⚠️ Settings saved, but failed to initialize AI. Please check your API key.');
             console.error('AI initialization error:', e);
         }
     } else {
         localStorage.removeItem('userApiKey');
         userApiKey = '';
-        showToast({ message: 'API key removed. AI features will be disabled.', type: 'warning' });
+        alert('⚠️ API key removed. AI features will be disabled.');
     }
     
     settingsModal.classList.add('hidden');
@@ -732,7 +664,7 @@ exportDataBtn.addEventListener('click', () => {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     
-    showToast({ message: 'Data exported successfully!', type: 'success' });
+    alert('✅ Data exported successfully!');
 });
 
 importDataBtn.addEventListener('click', () => {
@@ -745,7 +677,7 @@ clearDataBtn.addEventListener('click', () => {
             localStorage.removeItem('tests');
             localStorage.removeItem('performanceHistory');
             
-            showToast({ message: 'All data has been cleared.', type: 'success' });
+            alert('🗑️ All data has been cleared.');
             settingsModal.classList.add('hidden');
             
             // Refresh current view
@@ -760,13 +692,13 @@ clearDataBtn.addEventListener('click', () => {
 clearResultsBtn?.addEventListener('click', () => {
     const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
     if (history.length === 0) {
-        showToast({ message: 'No results to clear.', type: 'info' });
+        alert('No results to clear.');
         return;
     }
     
     if (confirm(`⚠️ This will delete all ${history.length} test result(s) from your history.\n\nYour saved tests will NOT be affected.\n\nContinue?`)) {
         localStorage.removeItem('performanceHistory');
-        showToast({ message: `${history.length} result(s) cleared successfully.`, type: 'success' });
+        alert(`✅ ${history.length} result(s) cleared successfully.`);
         
         // Refresh views
         if (!performanceView.classList.contains('hidden')) renderPerformanceHistory();
@@ -779,13 +711,13 @@ clearResultsBtn?.addEventListener('click', () => {
 clearTestsBtn?.addEventListener('click', () => {
     const tests = getFromStorage<Test[]>('tests', []);
     if (tests.length === 0) {
-        showToast({ message: 'No tests to clear.', type: 'info' });
+        alert('No tests to clear.');
         return;
     }
     
     if (confirm(`⚠️ This will delete all ${tests.length} saved test(s).\n\nYour result history will NOT be affected.\n\nContinue?`)) {
         localStorage.removeItem('tests');
-        showToast({ message: `${tests.length} test(s) cleared successfully.`, type: 'success' });
+        alert(`✅ ${tests.length} test(s) cleared successfully.`);
         
         // Refresh views
         if (!allTestsView.classList.contains('hidden')) renderAllTests();
@@ -1016,7 +948,7 @@ function parseManualQuestions(text: string): Question[] | null {
 
 async function handleGenerateTest() {
     if (!ai) {
-        showToast({ message: 'AI Service is not available. Please configure API key in Settings.', type: 'error' });
+        alert("AI Service is not available.");
         return;
     }
 
@@ -1194,7 +1126,7 @@ async function handleGenerateTest() {
         showView(editTestView);
     } catch (error) {
         console.error("Error generating test:", error);
-        showToast({ message: `Failed to generate test. ${error.message}`, type: 'error' });
+        alert(`Failed to generate test. ${error.message}`);
     } finally {
         (loader.querySelector('p') as HTMLElement).textContent = 'Generating your test, please wait...';
         loader.classList.add('hidden');
@@ -1379,10 +1311,10 @@ saveTestBtn.addEventListener('click', () => {
     
     if (existingIndex > -1) {
         tests[existingIndex] = currentTest;
-        showToast({ message: 'Test updated successfully!', type: 'success' });
+        alert('Test updated successfully!');
     } else {
         tests.unshift(currentTest);
-        showToast({ message: 'Test created successfully!', type: 'success' });
+        alert('Test created successfully!');
     }
     
     saveToStorage('tests', tests);
@@ -1626,19 +1558,19 @@ function handleImportTest(event: Event) {
             tests.unshift(newTest);
             saveToStorage('tests', tests);
 
-            showToast({ message: `Test "${newTest.name}" imported successfully!`, type: 'success' });
+            alert(`Test "${newTest.name}" imported successfully!`);
             renderAllTests();
 
         } catch (error) {
             console.error("Error importing test:", error);
-            showToast({ message: `Failed to import test. ${error.message}`, type: 'error' });
+            alert(`Failed to import test. ${error.message}`);
         } finally {
             // Reset input value to allow re-uploading the same file
             input.value = '';
         }
     };
     reader.onerror = () => {
-         showToast({ message: 'Error reading the file.', type: 'error' });
+         alert('Error reading the file.');
          input.value = '';
     };
     reader.readAsText(file);
@@ -1710,7 +1642,7 @@ testDetailActions.addEventListener('click', e => {
             let tests = getFromStorage<Test[]>('tests', []);
             tests = tests.filter(t => t.id !== currentTest.id);
             saveToStorage('tests', tests);
-            showToast({ message: 'Test deleted.', type: 'success' });
+            alert('Test deleted.');
             renderAllTests();
             showView(allTestsView);
         }
@@ -1848,12 +1780,12 @@ function navigateToQuestion(newIndex: number) {
         updatePalette();
         questionStartTime = Date.now();
         // Show a subtle toast instead of alert
-        showToast({ message: 'Last question reached. Click Submit when ready.', type: 'info' });
+        showToast("Last question reached. Click Submit when ready.", "info");
         return;
     }
     if (newIndex < 0) {
         questionStartTime = Date.now();
-        showToast({ message: 'You\'re at the first question.', type: 'info' });
+        showToast("You're at the first question.", "info");
         return;
     }
 
@@ -1869,6 +1801,30 @@ function navigateToQuestion(newIndex: number) {
     updatePalette();
 }
 
+// Toast notification system
+function showToast(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') {
+    // Remove any existing toast
+    const existingToast = document.querySelector('.toast-notification');
+    if (existingToast) existingToast.remove();
+    
+    const toast = document.createElement('div');
+    toast.className = `toast-notification toast-${type}`;
+    toast.innerHTML = `
+        <span class="material-symbols-outlined">${type === 'info' ? 'info' : type === 'success' ? 'check_circle' : type === 'warning' ? 'warning' : 'error'}</span>
+        <span>${message}</span>
+    `;
+    document.body.appendChild(toast);
+    
+    // Animate in
+    setTimeout(() => toast.classList.add('show'), 10);
+    
+    // Remove after 2.5 seconds
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 2500);
+}
+
 const prevBtn = document.getElementById('prev-btn') as HTMLButtonElement;
 
 saveNextBtn.addEventListener('click', () => navigateToQuestion(currentQuestionIndex + 1));
@@ -1879,7 +1835,7 @@ clearResponseBtn.addEventListener('click', () => {
     const selectedOption = document.querySelector('input[name="option"]:checked') as HTMLInputElement;
     if (selectedOption) {
         selectedOption.checked = false;
-        showToast({ message: 'Response cleared', type: 'info' });
+        showToast("Response cleared", "info");
     }
 });
 
@@ -1904,7 +1860,7 @@ function handleSubmitTest() {
 
         if (!currentTest) {
             console.error("Submission failed: currentTest is not available.");
-            showToast({ message: 'Critical error: Test data is missing. Unable to submit.', type: 'error' });
+            alert("A critical error occurred: Test data is missing. Unable to submit.");
             showView(mainView); // Go back to the main menu for safety
             return;
         }
@@ -1960,7 +1916,7 @@ function handleSubmitTest() {
 
     } catch (error) {
         console.error("An unexpected error occurred during test submission:", error);
-        showToast({ message: 'An unexpected error occurred while submitting your test. Your progress could not be saved.', type: 'error' });
+        alert("An unexpected error occurred while submitting your test. Your progress could not be saved.");
         showView(mainView); // Fallback to main view on error
     }
 }
@@ -1977,7 +1933,7 @@ function startTimer() {
         
         if (timeRemaining <= 0) {
             stopTimer();
-            showToast({ title: 'Time\'s Up!', message: 'Your test will be submitted automatically.', type: 'warning' });
+            alert("Time's up! Your test will be submitted automatically.");
             handleSubmitTest();
         }
     }, 1000);
@@ -2236,7 +2192,7 @@ performanceContainer.addEventListener('click', (e) => {
                     startTest(attempt.fullTest);
                 }
             } else {
-                showToast({ message: 'Test data not available for retry.', type: 'warning' });
+                alert('⚠️ Test data not available for retry.');
             }
         }
         return;
@@ -2258,7 +2214,7 @@ performanceContainer.addEventListener('click', (e) => {
                 renderPerformanceHistory();
                 
                 // Show brief confirmation
-                showToast({ message: 'Result deleted successfully', type: 'success' });
+                showNotification('Result deleted successfully', 'success');
             }
         }
         return;
@@ -2266,6 +2222,17 @@ performanceContainer.addEventListener('click', (e) => {
 });
 
 // Helper function to show notifications
+function showNotification(message: string, type: 'success' | 'error' | 'info' = 'success') {
+    const notification = document.createElement('div');
+    notification.className = `toast-notification toast-${type}`;
+    
+    const icon = type === 'success' ? 'check_circle' : type === 'error' ? 'error' : 'info';
+    notification.innerHTML = `<span class="material-symbols-outlined">${icon}</span> ${message}`;
+    
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 2500);
+}
+
 function renderPerformanceReport(attempt: TestAttempt, fromHistory: boolean = true) {
     currentAttemptForReport = attempt; // Store attempt for deeper analysis
     
@@ -2382,7 +2349,7 @@ function renderPerformanceReport(attempt: TestAttempt, fromHistory: boolean = tr
                     startTest(attempt.fullTest);
                 }
             } else {
-                showToast({ message: 'Test data not available for retry.', type: 'warning' });
+                alert('⚠️ Test data not available for retry.');
             }
         };
     }
@@ -2400,7 +2367,7 @@ function renderPerformanceReport(attempt: TestAttempt, fromHistory: boolean = tr
                 if (indexToDelete !== -1) {
                     history.splice(indexToDelete, 1);
                     saveToStorage('performanceHistory', history);
-                    showToast({ message: 'Result deleted successfully', type: 'success' });
+                    showNotification('Result deleted successfully', 'success');
                     
                     // Navigate back
                     if (reportReturnView === performanceView) {
@@ -2866,11 +2833,6 @@ function renderTopicWiseAnalysis(attempt: TestAttempt) {
     Object.values(topicStats).forEach(stat => {
         stat.avgTime = stat.total > 0 ? stat.totalTime / stat.total : 0;
     });
-    
-    // Calculate overall average time for comparison
-    const totalTime = Object.values(topicStats).reduce((sum, stat) => sum + stat.totalTime, 0);
-    const totalQuestions = Object.values(topicStats).reduce((sum, stat) => sum + stat.total, 0);
-    const avgTime = totalQuestions > 0 ? totalTime / totalQuestions : 0;
     
     // Sort by accuracy
     const sortedTopics = Object.entries(topicStats)
@@ -3401,20 +3363,13 @@ interface SubjectAnalytics {
 let aggregatedSubjectData: { [key: string]: SubjectAnalytics } = {};
 
 function renderAnalyticsDashboard() {
-    try {
-        const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
-        
-        // Clear any existing trend graph to prevent duplicates
-        const existingTrend = document.querySelector('.score-trend-card');
-        if (existingTrend) {
-            existingTrend.remove();
-        }
-        
-        if (history.length === 0) {
-            analyticsStatsGrid.innerHTML = `<p class="placeholder" style="grid-column: 1/-1;">No data available. Complete some tests to see your analytics.</p>`;
-            subjectMasteryContainer.innerHTML = '';
-            return;
-        }
+    const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
+    
+    if (history.length === 0) {
+        analyticsStatsGrid.innerHTML = `<p class="placeholder" style="grid-column: 1/-1;">No data available. Complete some tests to see your analytics.</p>`;
+        subjectMasteryContainer.innerHTML = '';
+        return;
+    }
 
     // Reset Aggregation
     aggregatedSubjectData = {};
@@ -3573,11 +3528,6 @@ function renderAnalyticsDashboard() {
             </div>
         </div>
     `}).join('');
-    } catch (error) {
-        console.error('Error rendering analytics dashboard:', error);
-        analyticsStatsGrid.innerHTML = `<p class="placeholder" style="grid-column: 1/-1;">Error loading analytics. Please try again.</p>`;
-        subjectMasteryContainer.innerHTML = '';
-    }
 }
 
 // Score Trend Graph
@@ -3653,10 +3603,7 @@ subjectMasteryContainer.addEventListener('click', (e) => {
 
 function openSubjectModal(subject: string) {
     const data = aggregatedSubjectData[subject];
-    if (!data) {
-        showToast({ message: 'Subject data not available.', type: 'warning' });
-        return;
-    }
+    if (!data) return;
 
     modalSubjectTitle.textContent = `${subject} Analysis`;
     const accuracy = (data.correct / data.total) * 100;
