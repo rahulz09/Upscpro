@@ -2214,7 +2214,19 @@ performanceContainer.addEventListener('click', (e) => {
         if (item) {
             const index = parseInt(item.dataset.attemptIndex, 10);
             const history = getFromStorage<TestAttempt[]>('performanceHistory', []);
-            renderPerformanceReport(history[index], true);
+            
+            if (isNaN(index) || index < 0 || index >= history.length) {
+                showToast({ message: 'Unable to load result. Please try again.', type: 'error' });
+                return;
+            }
+            
+            const attempt = history[index];
+            if (!attempt) {
+                showToast({ message: 'Result data not found.', type: 'error' });
+                return;
+            }
+            
+            renderPerformanceReport(attempt, true);
             showView(performanceReportView);
         }
         return;
@@ -2267,6 +2279,11 @@ performanceContainer.addEventListener('click', (e) => {
 
 // Helper function to show notifications
 function renderPerformanceReport(attempt: TestAttempt, fromHistory: boolean = true) {
+    if (!attempt || !attempt.fullTest) {
+        showToast({ message: 'Invalid result data. Cannot display report.', type: 'error' });
+        return;
+    }
+    
     currentAttemptForReport = attempt; // Store attempt for deeper analysis
     
     // Update Back button logic based on entry point
